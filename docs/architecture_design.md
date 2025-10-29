@@ -144,7 +144,8 @@ graph TD
 smart-lead-agent/
 ├── main.py                 # FastAPI 应用入口及API端点定义
 ├── .env.example            # 环境变量模板
-├── requirements.txt        # Python 依赖
+├── pyproject.toml          # 项目配置和依赖管理（uv）
+├── requirements.txt        # Python 依赖（兼容性，推荐使用 pyproject.toml）
 ├── config.py               # 配置加载器 (ConfigManager)
 │
 ├── core/
@@ -291,3 +292,347 @@ class SendStatus(BaseModel):
           # ...
           pass
   ```
+
+## 8. 文件详细说明
+
+本章节详细说明了项目中每个文件的作用、职责和关键实现细节。
+
+### 8.1. 根目录文件
+
+#### `main.py`
+
+- **作用**: FastAPI 应用的入口文件，是整个系统的协调器（Orchestrator）
+- **职责**:
+  - 初始化 FastAPI 应用实例
+  - 定义 API 端点（如 `/generate-lead`）
+  - 在应用启动生命周期中初始化所有核心模块（搜索、分析、生成、邮件发送）
+  - 协调整个潜在客户开发流程：接收公司名称 → 搜索 → 分析 → 生成 → 发送 → 记录
+  - 处理数据库会话管理和错误处理
+- **关键特性**:
+  - 使用 FastAPI 的 `lifespan` 上下文管理器管理模块生命周期
+  - 自动创建数据库表（如果不存在）
+  - 优先使用 ESP (SendGrid)，如果未配置则回退到 SMTP
+  - 完整的错误处理和日志记录
+
+#### `config.py`
+
+- **作用**: 配置管理模块（ConfigManager），负责从环境变量加载所有配置
+- **职责**:
+  - 定义 `Settings` 类，使用 Pydantic Settings 进行类型验证
+  - 从 `.env` 文件加载环境变量
+  - 提供全局可访问的配置实例（使用 `lru_cache` 实现单例模式）
+- **配置项包括**:
+  - 数据库连接信息（主机、端口、用户名、密码、数据库名）
+  - 外部 API 密钥（Serper.dev、OpenAI）
+  - 邮件服务配置（SMTP 或 SendGrid）
+- **关键特性**: 类型安全、自动验证、单例模式
+
+#### `pyproject.toml`
+
+- **作用**: 项目配置和依赖管理文件（使用 uv 标准格式）
+- **职责**:
+  - 定义项目元数据（名称、版本、描述）
+  - 声明 Python 版本要求（>=3.11）
+  - 列出所有项目依赖及其版本约束
+  - 定义可选的开发依赖
+  - 配置代码格式化工具（black、ruff）
+- **包含的主要依赖**:
+  - `fastapi`, `uvicorn`: Web 框架和 ASGI 服务器
+  - `pydantic`, `pydantic-settings`: 数据验证和配置管理
+  - `sqlalchemy`, `pymysql`: ORM 和 MySQL 驱动
+  - `httpx`: HTTP 客户端（用于搜索 API 调用）
+  - `openai`: OpenAI API 客户端
+  - `sendgrid`: SendGrid 邮件服务 SDK
+  - `python-dotenv`: 环境变量加载
+- **依赖管理（使用 uv）**:
+  - `uv sync`: 同步安装所有依赖到虚拟环境（推荐，会自动创建 `.venv`）
+  - `uv sync --no-install-project`: 只安装依赖，不安装项目本身（适合应用程序）
+  - `uv add <package>`: 添加新依赖（会自动更新 pyproject.toml）
+  - `uv add --dev <package>`: 添加开发依赖
+  - `uv remove <package>`: 移除依赖
+  - `uv run <command>`: 在虚拟环境中运行命令（无需激活虚拟环境）
+- **注意**: 项目使用 `uv` 进行依赖管理，不再使用 `pip`。`requirements.txt` 仅保留作为兼容性参考
+
+#### `requirements.txt`
+
+- **作用**: Python 项目依赖清单文件（兼容性保留）
+- **说明**:
+  - 保留此文件是为了兼容性，但**项目已完全切换到使用 `uv` 进行依赖管理**
+  - 主要依赖管理通过 `pyproject.toml` 完成
+  - 可以使用 `uv pip compile pyproject.toml -o requirements.txt` 从 `pyproject.toml` 生成更新
+  - **不推荐**直接使用 `pip install -r requirements.txt`，应使用 `uv sync` 代替
+
+#### `.env.example`
+
+- **作用**: 环境变量配置模板文件
+- **内容**: 包含所有必需和可选的环境变量示例，方便新开发者快速配置
+- **使用方式**: 复制为 `.env` 并填入实际值
+
+#### `README.md`
+
+- **作用**: 项目的主要文档，包含快速开始指南、API 使用说明、项目结构介绍等
+
+### 8.2. 核心业务模块 (`core/`)
+
+#### `core/__init__.py`
+
+- **作用**: Python 包初始化文件，使 `core` 成为一个可导入的包
+
+#### `core/schemas.py`
+
+- **作用**: 定义所有的数据传输对象（DTOs），使用 Pydantic 模型
+- **包含的模型**:
+  - `SearchResult`: 封装单条搜索结果（标题、链接、摘要）
+  - `ContactInfo`: 结构化的联系人信息（姓名、邮箱、LinkedIn、职位、来源）
+  - `GeneratedEmail`: 生成的邮件内容（主题和正文）
+  - `SendStatus`: 邮件发送结果（成功状态、消息 ID、错误信息）
+- **关键特性**:
+  - 自动类型验证（如 `EmailStr`, `HttpUrl`）
+  - 作为各模块间数据交换的契约，确保类型安全
+
+#### `core/search.py`
+
+- **作用**: 搜索模块（SearchModule），负责与外部搜索服务交互
+- **职责**:
+  - 封装与 Serper.dev API 的交互逻辑
+  - 执行多个搜索查询（支持格式化字符串，如 `"{company_name} 采购经理"`）
+  - 将原始搜索结果转换为 `SearchResult` 对象列表
+- **关键特性**:
+  - 使用 `httpx.Client` 进行异步 HTTP 请求
+  - 完整的错误处理和日志记录
+  - 支持多个查询的聚合结果
+
+#### `core/analysis.py`
+
+- **作用**: 分析模块（AnalysisModule），负责从搜索结果中提取联系人信息
+- **职责**:
+  - 快速正则表达式扫描，查找可能的邮箱地址
+  - 使用 OpenAI GPT-4o 模型进行深度信息提取
+  - 从搜索结果中提取结构化联系人信息（姓名、邮箱、LinkedIn、职位）
+  - 验证提取的数据有效性
+- **关键特性**:
+  - 混合策略：规则匹配 + AI 分析
+  - 使用 JSON 格式的 LLM 响应，确保结构化输出
+  - 智能过滤：排除通用邮箱（contact@, info@, sales@）
+  - 完整的错误处理和 Pydantic 验证
+
+#### `core/generation.py`
+
+- **作用**: 生成模块（GenerationModule），负责生成个性化的开发信
+- **职责**:
+  - 根据联系人信息和公司名称生成个性化的邮件主题和正文
+  - 使用 OpenAI GPT-4o 模型进行内容创作
+  - 确保邮件符合业务要求（长度、格式、语调等）
+- **关键特性**:
+  - 动态 Prompt 生成，包含个性化信息
+  - 使用 `temperature=0.7` 平衡创造性和专业性
+  - JSON 格式输出，便于解析和验证
+
+#### `core/email/__init__.py`
+
+- **作用**: 邮件模块包的初始化文件
+
+#### `core/email/base_sender.py`
+
+- **作用**: 邮件发送器的抽象基类，定义统一接口
+- **职责**:
+  - 定义 `BaseEmailSender` 抽象类
+  - 声明 `send()` 抽象方法，所有具体实现必须遵循此接口
+- **设计模式**: 策略模式（Strategy Pattern），允许运行时选择不同的邮件发送实现
+
+#### `core/email/smtp_sender.py`
+
+- **作用**: SMTP 邮件发送实现
+- **职责**:
+  - 实现 `BaseEmailSender` 接口
+  - 使用标准 SMTP 协议发送邮件
+  - 配置验证（确保所有必需的 SMTP 参数已设置）
+- **限制**: 不支持邮件跟踪功能（打开率、点击率）
+- **适用场景**: 简单的邮件发送需求，不要求详细追踪
+
+#### `core/email/esp_sender.py`
+
+- **作用**: ESP（邮件服务提供商）邮件发送实现，当前使用 SendGrid
+- **职责**:
+  - 实现 `BaseEmailSender` 接口
+  - 使用 SendGrid API 发送邮件
+  - 提取并返回 SendGrid 的消息 ID（用于后续追踪）
+- **优势**:
+  - 支持完整的邮件跟踪（打开率、点击率、退信率）
+  - 更好的送达率
+  - 通过 Webhook 接收邮件事件
+- **适用场景**: 需要完整邮件追踪和分析的场景
+
+### 8.3. 数据库层 (`database/`)
+
+#### `database/__init__.py`
+
+- **作用**: 数据库模块包的初始化文件
+
+#### `database/connection.py`
+
+- **作用**: 数据库连接管理模块
+- **职责**:
+  - 从配置中构建数据库连接 URL
+  - 创建 SQLAlchemy 引擎和会话工厂
+  - 定义 `Base` 类，所有 ORM 模型都继承此类
+  - 提供 `get_db()` 函数作为 FastAPI 依赖项，用于管理请求级数据库会话
+- **关键特性**:
+  - `pool_pre_ping=True`: 自动检测并恢复断开的连接
+  - 使用生成器模式管理会话生命周期
+
+#### `database/models.py`
+
+- **作用**: SQLAlchemy ORM 模型定义
+- **职责**:
+  - 定义与数据库表对应的 Python 类
+  - 建立表之间的关联关系（外键和 Relationship）
+- **包含的模型**:
+  - `Company`: 公司表模型（id, name, status, created_at）
+  - `Contact`: 联系人表模型（id, company_id, full_name, email, linkedin_url, role, source, created_at）
+  - `Email`: 邮件表模型（id, contact_id, subject, body, status, sent_at, error_message, created_at）
+  - `EmailEvent`: 邮件事件表模型（id, email_id, event_type, timestamp, metadata）
+- **关联关系**:
+  - Company ↔ Contact (一对多)
+  - Contact ↔ Email (一对多)
+  - Email ↔ EmailEvent (一对多)
+- **关键特性**: 使用 `relationship()` 和 `back_populates` 实现双向关联，支持级联删除
+
+#### `database/repository.py`
+
+- **作用**: 数据访问层（Repository Pattern），封装所有数据库操作
+- **职责**:
+  - 提供高级的、面向业务的数据库操作方法
+  - 隐藏 SQLAlchemy 查询细节，提供简洁的 API
+  - 处理事务管理和数据转换
+- **主要方法**:
+  - `get_or_create_company()`: 获取或创建公司记录
+  - `create_contact()`: 创建联系人记录
+  - `get_contact_by_email()`: 根据邮箱查找联系人
+  - `create_email()`: 创建邮件记录
+  - `update_email_status()`: 更新邮件发送状态
+  - `create_email_event()`: 记录邮件事件（打开、点击等）
+- **设计模式**: 仓储模式（Repository Pattern），将数据访问逻辑与业务逻辑分离
+
+#### `database/sql/001_initial_schema.sql`
+
+- **作用**: 数据库初始化 DDL 脚本
+- **职责**:
+  - 包含所有数据库表的 `CREATE TABLE` 语句
+  - 定义表结构、字段类型、约束、索引和外键关系
+  - 用于初始化和版本管理
+- **包含的表**: `companies`, `contacts`, `emails`, `email_events`
+- **关键特性**:
+  - 使用 `DROP TABLE IF EXISTS` 确保幂等性
+  - 完整的外键约束，支持级联删除
+  - 合适的索引优化查询性能
+
+### 8.4. 文档和测试
+
+#### `docs/architecture_design.md`
+
+- **作用**: 系统架构设计文档，详细说明系统设计、组件接口、数据库模式等
+
+#### `tests/`
+
+- **作用**: 测试目录（建议添加）
+- **建议内容**: 单元测试、集成测试、API 测试等
+
+### 8.5. 文件依赖关系图
+
+```mermaid
+graph TD
+    A[main.py] --> B[config.py]
+    A --> C[core/search.py]
+    A --> D[core/analysis.py]
+    A --> E[core/generation.py]
+    A --> F[core/email/]
+    A --> G[database/repository.py]
+
+    B --> H[.env]
+
+    C --> I[core/schemas.py]
+    C --> J[httpx]
+
+    D --> I
+    D --> K[openai]
+
+    E --> I
+    E --> K
+
+    F --> I
+    F --> L[sendgrid/smtplib]
+
+    G --> M[database/models.py]
+    G --> N[database/connection.py]
+    G --> I
+
+    M --> N
+    N --> O[SQLAlchemy]
+
+    P[database/sql/001_initial_schema.sql] --> Q[MySQL]
+
+    style A fill:#4f8b9f,stroke:#2b303a,stroke-width:2px,color:#fff
+    style B fill:#6b7f8f,stroke:#2b303a,stroke-width:2px,color:#fff
+    style I fill:#8b9faf,stroke:#2b303a,stroke-width:2px,color:#fff
+```
+
+### 8.6. 数据流图
+
+系统处理一个潜在客户请求时的完整数据流：
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant main.py
+    participant SearchModule
+    participant AnalysisModule
+    participant GenerationModule
+    participant EmailSender
+    participant Repository
+    participant Database
+
+    Client->>main.py: POST /generate-lead
+    main.py->>Repository: get_or_create_company()
+    Repository->>Database: INSERT/SELECT
+    Database-->>Repository: Company
+    Repository-->>main.py: Company
+
+    main.py->>SearchModule: search_for_company()
+    SearchModule->>Serper.dev: API Request
+    Serper.dev-->>SearchModule: Search Results
+    SearchModule-->>main.py: List[SearchResult]
+
+    main.py->>AnalysisModule: find_contact()
+    AnalysisModule->>OpenAI: LLM Request
+    OpenAI-->>AnalysisModule: Contact Info
+    AnalysisModule-->>main.py: ContactInfo
+
+    main.py->>Repository: create_contact()
+    Repository->>Database: INSERT
+    Database-->>Repository: Contact
+    Repository-->>main.py: Contact
+
+    main.py->>GenerationModule: generate_cold_email()
+    GenerationModule->>OpenAI: LLM Request
+    OpenAI-->>GenerationModule: Email Content
+    GenerationModule-->>main.py: GeneratedEmail
+
+    main.py->>Repository: create_email()
+    Repository->>Database: INSERT
+    Database-->>Repository: Email
+    Repository-->>main.py: Email
+
+    main.py->>EmailSender: send()
+    EmailSender->>SMTP/SendGrid: Send Email
+    SMTP/SendGrid-->>EmailSender: SendStatus
+
+    EmailSender-->>main.py: SendStatus
+
+    main.py->>Repository: update_email_status()
+    Repository->>Database: UPDATE
+    Database-->>Repository: OK
+    Repository-->>main.py: OK
+
+    main.py-->>Client: Response
+```
