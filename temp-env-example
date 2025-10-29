@@ -1,0 +1,23 @@
+# 数据库配置
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=user
+DB_PASSWORD=password
+DB_NAME=smart_lead_agent
+
+# 外部 API
+SERPER_API_KEY="your_serper_api_key"
+OPENAI_API_KEY="your_openai_api_key"
+
+# 邮件配置 (二选一)
+
+# 方案一: 标准 SMTP
+SMTP_HOST="smtp.example.com"
+SMTP_PORT=587
+SMTP_USER="your_email@example.com"
+SMTP_PASSWORD="your_email_password"
+SENDER_EMAIL="your_email@example.com"
+
+# 方案二: 邮件服务提供商 (ESP) - 例如 SendGrid
+SENDGRID_API_KEY="your_sendgrid_api_key"
+ESP_SENDER_EMAIL="your_verified_sender@example.com"
