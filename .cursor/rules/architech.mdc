@@ -1,0 +1,437 @@
+---
+alwaysApply: true
+---
+
+# 项目架构规范
+
+本文档定义了 Smart Lead Agent 项目的架构规范，明确了模块职责、文件组织、函数放置等约束。
+
+**注意**：FastAPI 具体用法、异步规范、依赖注入等技术细节请参考 `fastapi.mdc`。LangChain 使用方式请参考 `langchain.mdc`。
+
+## 架构概览
+
+项目采用 **模块化、扁平化** 的三层架构：
+
+```
+应用入口层 (main.py) → 路由层 (router.py) → 服务层 (service.py) → 仓储层 (repository.py) → ORM 模型层 (models.py)
+```
+
+## 核心设计原则
+
+### 1. 模块化（Modularity）
+
+- **独立板块**：每个业务板块（FindKP, MailManager, Writer）独立，互不依赖
+- **职责单一**：每个模块只负责一个业务领域
+- **清晰的边界**：模块间通过明确的接口交互
+
+### 2. 扁平化（Flat Structure）
+
+- **避免嵌套**：顶层目录直接表达业务板块，不超过 3 层深度
+- **清晰命名**：目录和文件名清晰表达其用途
+- **易于导航**：开发者可以快速找到需要的代码
+
+### 3. 关注点分离（Separation of Concerns）
+
+- **路由层**：只处理 HTTP 请求/响应，不包含业务逻辑
+- **服务层**：实现业务逻辑，不关心 HTTP 细节
+- **数据层**：封装数据库操作，不涉及业务规则
+
+## 目录结构与职责
+
+### 顶层文件
+
+```
+smart-lead-agent/
+├── main.py              # ✅ FastAPI 应用入口，路由注册
+├── config.py            # ✅ 配置管理（Settings）
+├── pyproject.toml       # ✅ 依赖管理（uv）
+└── .env.example         # ✅ 环境变量模板
+```
+
+**约束**：
+
+- ❌ **禁止**在顶层创建业务逻辑文件
+- ❌ **禁止**在顶层创建工具函数文件
+- ✅ **允许**配置文件、入口文件、依赖管理文件
+
+### schemas/ - 全局共享数据模型
+
+```
+schemas/
+├── __init__.py          # ✅ 导出共享模型
+├── base.py              # ✅ 基础响应模型（BaseResponse）
+└── contact.py           # ✅ 业务相关模型（KPInfo, FindKPResponse）
+```
+
+**职责**：
+
+- 定义 Pydantic 数据模型
+- 提供 API 请求/响应的类型定义
+- 全局共享的数据结构
+
+**约束**：
+
+- ✅ **放置位置**：所有业务模块共用的 Pydantic 模型
+- ❌ **禁止**放置：板块特定的模型（应放在板块目录）
+- ✅ **命名规范**：使用 PascalCase（如 `CompanyQuery`, `KPInfo`）
+- ✅ **继承规范**：响应模型继承 `BaseResponse`
+
+**技术细节**：Pydantic 模型定义方式、继承规范等请参考 `fastapi.mdc` 中的"Pydantic 模型规范"章节。
+
+### database/ - 数据库层
+
+```
+database/
+├── __init__.py
+├── connection.py        # ✅ 数据库连接管理（get_db, engine）
+├── models.py            # ✅ SQLAlchemy ORM 模型（Company, Contact）
+├── repository.py        # ✅ 仓储层（Repository）
+└── sql/                 # ✅ SQL 脚本
+    └── 001_findkp_schema.sql
+```
+
+#### `database/connection.py`
+
+**职责**：数据库连接和会话管理
+
+**约束**：
+
+- ✅ **必须提供**：`get_db()` 函数（用于依赖注入）
+- ✅ **必须提供**：`engine` 和 `Base`（用于 ORM）
+- ❌ **禁止**放置：业务逻辑、数据查询操作
+
+**技术细节**：具体实现方式请参考 `fastapi.mdc` 中的"依赖注入规范"章节。
+
+#### `database/models.py`
+
+**职责**：SQLAlchemy ORM 模型定义
+
+**约束**：
+
+- ✅ **放置位置**：所有数据库表的 ORM 模型
+- ✅ **命名规范**：使用 PascalCase，单数形式（如 `Company`, `Contact`）
+- ❌ **禁止**放置：业务逻辑、数据访问方法
+- ✅ **表名规范**：使用小写、复数形式（如 `companies`, `contacts`）
+
+#### `database/repository.py`
+
+**职责**：数据访问层，封装数据库 CRUD 操作
+
+**约束**：
+
+- ✅ **放置位置**：所有数据库操作的方法
+- ✅ **使用模式**：仓储模式（Repository Pattern）
+- ✅ **命名规范**：方法名清晰表达操作（如 `get_or_create_company()`）
+- ❌ **禁止**放置：业务逻辑、HTTP 处理、外部 API 调用
+- ✅ **参数规范**：第一个参数必须是 `self.db`（数据库会话）
+
+### 业务板块目录（findkp/, mail_manager/, writer/）
+
+每个业务板块遵循相同的结构：
+
+```
+{module_name}/
+├── __init__.py          # ✅ 模块初始化
+├── router.py            # ✅ API 路由定义
+├── service.py           # ✅ 业务逻辑实现
+└── prompts.py           # ✅ LLM Prompt 模板（可选）
+```
+
+#### `{module_name}/router.py`
+
+**职责**：定义 API 端点，处理 HTTP 请求/响应
+
+**约束**：
+
+- ✅ **放置位置**：所有该模块的 API 路由定义
+- ✅ **必须使用**：`APIRouter` 创建路由
+- ✅ **必须指定**：`prefix` 和 `tags`
+- ❌ **禁止**放置：业务逻辑、数据库操作、外部 API 调用
+- ✅ **必须使用**：`async def` 定义端点函数
+- ✅ **必须指定**：`response_model` 参数
+- ✅ **依赖注入**：数据库会话通过 `Depends(get_db)` 注入
+
+**技术细节**：FastAPI 路由定义、依赖注入、异步使用等具体方式请参考 `fastapi.mdc`。
+
+#### `{module_name}/service.py`
+
+**职责**：实现业务逻辑，协调外部服务和数据访问
+
+**约束**：
+
+- ✅ **放置位置**：所有该模块的业务逻辑
+- ✅ **类命名**：使用 `{ModuleName}Service`（如 `FindKPService`）
+- ✅ **必须使用**：`async def` 定义方法（与 FastAPI 异步保持一致）
+- ✅ **可以调用**：外部 API、LLM、Repository
+- ❌ **禁止**放置：HTTP 处理、路由定义、ORM 模型定义
+- ✅ **依赖注入**：数据库会话作为参数传入，不直接创建
+
+**技术细节**：LangChain 使用方式请参考 `langchain.mdc`，异步方法使用请参考 `fastapi.mdc`。
+
+#### `{module_name}/prompts.py`
+
+**职责**：存储 LLM Prompt 模板
+
+**约束**：
+
+- ✅ **放置位置**：该模块使用的所有 Prompt 模板
+- ✅ **命名规范**：使用大写下划线（如 `EXTRACT_COMPANY_INFO_PROMPT`）
+- ✅ **格式规范**：使用格式化字符串（`.format()` 或 f-string）
+- ❌ **禁止**放置：业务逻辑、API 调用
+
+## main.py - 应用入口
+
+**职责**：
+
+- FastAPI 应用实例创建
+- 路由注册
+- 全局中间件配置
+- 全局异常处理
+- 数据库初始化
+
+**约束**：
+
+- ✅ **必须注册**：所有板块的路由
+- ❌ **禁止**放置：业务逻辑、具体路由定义
+- ✅ **可以放置**：全局健康检查、根端点
+
+**技术细节**：FastAPI 应用创建和路由注册的具体方式请参考 `fastapi.mdc` 和项目实际代码。
+
+## config.py - 配置管理
+
+**职责**：集中管理所有配置项
+
+**约束**：
+
+- ✅ **使用方式**：Pydantic Settings
+- ✅ **数据来源**：环境变量（`.env` 文件）
+- ✅ **访问方式**：通过全局 `settings` 实例
+- ❌ **禁止**放置：业务逻辑、工具函数
+
+**技术细节**：Pydantic Settings 具体使用方式请参考 `fastapi.mdc` 中的"配置管理规范"章节。
+
+## 文件放置规则总结
+
+### ✅ 路由相关 → `{module}/router.py`
+
+- API 端点定义
+- HTTP 请求/响应处理
+- 参数验证和错误转换
+
+### ✅ 业务逻辑 → `{module}/service.py`
+
+- 业务规则实现
+- 外部 API 调用
+- LLM 调用
+- 数据转换和处理
+
+### ✅ 数据库操作 → `database/repository.py`
+
+- CRUD 操作
+- 查询封装
+- 事务管理
+
+### ✅ ORM 模型 → `database/models.py`
+
+- 数据库表映射
+- 模型关系定义
+
+### ✅ 数据模型 → `schemas/`
+
+- API 请求/响应模型
+- 全局共享的数据结构
+
+### ✅ Prompt 模板 → `{module}/prompts.py`
+
+- LLM Prompt 定义
+- 模板字符串
+
+### ✅ 配置管理 → `config.py`
+
+- 环境变量读取
+- 配置类定义
+
+## 函数放置规则
+
+### 路由函数
+
+- ✅ **正确位置**：`router.py`
+- ❌ **错误位置**：`service.py`（HTTP 处理不应在服务层）
+
+### 业务逻辑函数
+
+- ✅ **正确位置**：`service.py`（业务逻辑方法）
+- ❌ **错误位置**：`router.py`（不应在路由层写业务逻辑）
+
+### 数据访问函数
+
+- ✅ **正确位置**：`repository.py`（数据库操作方法）
+- ❌ **错误位置**：`service.py`（不应在服务层直接操作数据库）
+
+## 导入规范
+
+### 导入顺序
+
+1. 标准库
+2. 第三方库
+3. 项目内部模块（按照层级）
+
+**示例顺序**：
+
+1. 标准库（如 `logging`, `typing`）
+2. 第三方库（如 `fastapi`, `sqlalchemy`）
+3. 项目内部 - 数据库层（如 `database.connection`, `database.repository`）
+4. 项目内部 - Schemas（如 `schemas.contact`）
+5. 项目内部 - 同模块（使用相对导入，如 `.service`）
+
+### 导入约束
+
+- ✅ **禁止循环导入**：A 模块导入 B，B 不能导入 A
+- ✅ **禁止跨模块导入**：findkp 不应直接导入 mail_manager
+- ✅ **优先相对导入**：同模块内使用 `.` 相对导入
+
+## 命名规范
+
+### 文件命名
+
+- ✅ **小写字母 + 下划线**：`router.py`, `service.py`, `find_kp.py`
+- ❌ **禁止**：大写、驼峰、连字符
+
+### 类命名
+
+- ✅ **PascalCase**：`FindKPService`, `Repository`, `Company`
+- ✅ **服务类后缀**：`{Module}Service`（如 `FindKPService`）
+
+### 函数命名
+
+- ✅ **小写字母 + 下划线**：`find_kps()`, `get_or_create_company()`
+- ✅ **动词开头**：`get_`, `create_`, `update_`, `delete_`
+
+### 常量命名
+
+- ✅ **大写下划线**：`EXTRACT_COMPANY_INFO_PROMPT`, `DEFAULT_TIMEOUT`
+
+### 变量命名
+
+- ✅ **小写字母 + 下划线**：`company_name`, `contact_info`
+
+## 模块职责边界
+
+### 禁止跨层调用
+
+```
+路由层 (router.py)
+    ↓ ✅ 可以调用
+服务层 (service.py)
+    ↓ ✅ 可以调用
+仓储层 (repository.py)
+    ↓ ✅ 可以调用
+模型层 (models.py)
+```
+
+**约束**：
+
+- ❌ **禁止**：路由层直接调用仓储层
+- ❌ **禁止**：服务层定义路由
+- ❌ **禁止**：仓储层包含业务逻辑
+
+### 禁止跨模块调用
+
+```
+findkp/
+    ↓ ❌ 禁止直接调用
+mail_manager/
+```
+
+**约束**：
+
+- ❌ **禁止**：findkp 直接导入 mail_manager
+- ✅ **允许**：通过共享的 `schemas/` 和 `database/` 交互
+- ✅ **允许**：通过 API 调用其他模块（如果暴露了 API）
+
+## 异步规范
+
+**必须使用异步的场景**：
+
+- ✅ 所有 `router.py` 中的端点函数
+- ✅ 所有 `service.py` 中的业务方法
+- ✅ 所有 `repository.py` 中的数据库操作
+- ✅ 数据库会话使用 `AsyncSession`
+
+**技术细节**：具体的异步使用方式、AsyncSession 配置等请参考 `fastapi.mdc` 中的"异步处理规范"章节。
+
+## 错误处理规范
+
+**职责划分**：
+
+- **路由层**：捕获异常并转换为 HTTP 响应
+- **服务层**：处理业务异常，向上抛出给路由层
+
+**技术细节**：具体的错误处理方式、HTTP 状态码使用等请参考 `fastapi.mdc` 中的"错误处理规范"章节。
+
+## 日志记录规范
+
+**职责划分**：
+
+- **路由层**：记录请求接收、响应返回
+- **服务层**：记录业务流程节点
+- **仓储层**：记录数据库操作（可选，通常不记录）
+
+**技术细节**：日志配置、使用方式、日志级别等请参考 `fastapi.mdc` 中的"日志记录规范"章节。
+
+## 添加新模块的检查清单
+
+在创建新模块（如 MailManager）时，确保：
+
+- [ ] 创建模块目录：`mail_manager/`
+- [ ] 创建必要文件：`__init__.py`, `router.py`, `service.py`
+- [ ] 在 `router.py` 中使用 `APIRouter` 创建路由
+- [ ] 在 `service.py` 中创建 `{Module}Service` 类
+- [ ] 在 `main.py` 中注册路由
+- [ ] 在 `schemas/` 中定义请求/响应模型（如需要）
+- [ ] 在 `database/models.py` 中添加 ORM 模型（如需要）
+- [ ] 在 `database/repository.py` 中添加数据访问方法（如需要）
+- [ ] 所有函数使用 `async def`
+- [ ] 数据库会话使用 `AsyncSession`
+
+## 架构决策记录
+
+### 为什么使用仓储模式？
+
+- **分离关注点**：业务逻辑不直接依赖 ORM
+- **易于测试**：可以 Mock Repository
+- **灵活切换**：可以轻松更换数据源
+
+### 为什么模块化设计？
+
+- **独立开发**：不同板块可以并行开发
+- **易于维护**：修改一个板块不影响其他板块
+- **清晰边界**：每个模块职责明确
+
+### 为什么扁平化结构？
+
+- **易于导航**：开发者快速找到代码
+- **减少嵌套**：避免过度设计的目录结构
+- **直观明了**：目录结构清晰表达业务结构
+
+## 违反规范的常见错误
+
+### 常见错误
+
+1. **业务逻辑放在路由层**：路由层只应处理 HTTP 请求/响应
+2. **HTTP 处理放在服务层**：服务层不应接收 `Request` 对象
+3. **数据库操作放在服务层**：应通过 `Repository` 访问数据库
+4. **跨模块直接调用**：禁止 findkp 直接导入 mail_manager
+
+**正确实践**请参考本文档各章节的职责划分。
+
+## 总结
+
+本架构规范确保了：
+
+1. ✅ **清晰的职责划分**：每个模块和文件职责明确
+2. ✅ **一致的代码组织**：新开发者可以快速理解代码结构
+3. ✅ **易于维护**：修改代码时知道在哪里找、在哪里改
+4. ✅ **可扩展性**：添加新模块遵循相同的模式
+
+**核心原则**：**分层清晰、模块独立、职责单一**

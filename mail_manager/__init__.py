@@ -1,0 +1,2 @@
+# MailManager module
+

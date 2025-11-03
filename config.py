@@ -9,7 +9,7 @@ load_dotenv()
 
 class Settings(BaseSettings):
     """
-    应用配置模型，使用 Pydantic 进行类型验证和设置管理。
+    应用配置模型,使用 Pydantic 进行类型验证和设置管理
     """
 
     # 数据库配置
@@ -19,23 +19,16 @@ class Settings(BaseSettings):
     DB_PASSWORD: str
     DB_NAME: str
 
-    # 外部 API 密钥
+    # API 密钥
     SERPER_API_KEY: str
     OPENAI_API_KEY: str
 
-    # 邮件配置 - SMTP
-    SMTP_HOST: str | None = None
-    SMTP_PORT: int | None = None
-    SMTP_USER: str | None = None
-    SMTP_PASSWORD: str | None = None
-    SENDER_EMAIL: str | None = None
-
-    # 邮件配置 - ESP (例如, SendGrid)
-    SENDGRID_API_KEY: str | None = None
-    ESP_SENDER_EMAIL: str | None = None
+    # LangChain 配置
+    LLM_MODEL: str = "gpt-4o"
+    LLM_TEMPERATURE: float = 0.0
 
     class Config:
-        # Pydantic-settings 配置，指定环境变量文件的位置
+        # Pydantic-settings 配置,指定环境变量文件的位置
         env_file = ".env"
         env_file_encoding = "utf-8"
 

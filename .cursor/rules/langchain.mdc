@@ -1,0 +1,540 @@
+---
+alwaysApply: true
+---
+
+# LangChain V1 开发最佳实践
+
+本文档基于 Smart Lead Agent 项目的实际架构，定义了 LangChain V1 的使用规范和最佳实践。
+
+## LangChain V1 版本要求
+
+### 依赖版本
+
+项目使用以下 LangChain 相关依赖：
+
+```toml
+langchain>=1.0.3
+langgraph>=1.0.2
+# 可选：如果需要特定提供商的额外功能
+# langchain-openai>=0.3.0  # 仅在需要 OpenAI 特定功能时使用
+```
+
+**注意**：虽然可以安装 `langchain-openai`，但推荐统一使用 `init_chat_model`，它已经包含在 `langchain` 包中。
+
+### 版本兼容性
+
+- **Python**: 要求 Python 3.9+（不再支持 Python 3.8）
+- **Pydantic**: 内部使用 Pydantic 2，完全支持 Pydantic 2，无需桥接
+- **异步支持**: 原生支持异步操作，与 FastAPI 完美集成
+
+## 架构选择原则
+
+### 何时使用 init_chat_model（直接调用）
+
+**适用于确定性线性流程**，当前 FindKP 板块使用此模式：
+
+```python
+from langchain.chat_models import init_chat_model
+from config import settings
+
+# 初始化 LLM（LangChain V1 标准方式）
+llm = init_chat_model(
+    model=settings.LLM_MODEL,
+    model_provider="openai",
+    temperature=settings.LLM_TEMPERATURE,
+    api_key=settings.OPENAI_API_KEY,
+)
+
+# 异步调用
+response = await llm.ainvoke([{"role": "user", "content": prompt}])
+result = json.loads(response.content)
+```
+
+**使用场景**：
+
+- ✅ 简单的提示词-响应模式
+- ✅ 确定性的数据处理流程
+- ✅ 需要低延迟和精确控制
+- ✅ 不需要工具调用和自主决策
+
+### 何时使用 create_agent（智能体模式）
+
+**适用于需要自主决策和工具调用的复杂场景**，未来 MailManager 和 Writer 板块可能使用：
+
+```python
+from langchain import create_agent
+from langchain.chat_models import init_chat_model
+
+# 创建智能体（使用 init_chat_model 创建 LLM）
+llm = init_chat_model(
+    model="gpt-4o",
+    model_provider="openai",
+    temperature=0,
+)
+agent = create_agent(
+    llm=llm,
+    tools=[search_tool, email_tool],
+    system_prompt="你是一个专业的邮件管理助手",
+)
+
+# 运行智能体
+result = await agent.ainvoke({"messages": [("user", "帮我查找并发送邮件")]})
+```
+
+**使用场景**：
+
+- ✅ 多步骤推理和决策
+- ✅ 需要动态工具选择
+- ✅ 复杂的任务分解和执行
+- ✅ 需要自主学习和适应
+
+### 何时使用 LangGraph
+
+**适用于需要复杂工作流和状态管理的场景**：
+
+```python
+from langgraph.graph import StateGraph
+
+# 构建状态图
+workflow = StateGraph(State)
+workflow.add_node("search", search_node)
+workflow.add_node("extract", extract_node)
+workflow.add_edge("search", "extract")
+```
+
+**使用场景**：
+
+- ✅ 复杂的工作流编排
+- ✅ 需要状态管理和循环控制
+- ✅ 多 Agent 协作
+- ✅ 条件分支和循环逻辑
+
+## 异步优先原则
+
+### 默认使用异步 API
+
+**所有 LangChain 操作应优先使用异步方法**，与 FastAPI 的异步架构保持一致：
+
+```python
+# ✅ 正确：使用异步方法和 init_chat_model
+from langchain.chat_models import init_chat_model
+
+class FindKPService:
+    def __init__(self):
+        self.llm = init_chat_model(
+            model=settings.LLM_MODEL,
+            model_provider="openai",
+            temperature=settings.LLM_TEMPERATURE,
+            api_key=settings.OPENAI_API_KEY,
+        )
+
+    async def extract_with_llm(self, prompt: str) -> dict:
+        """使用异步调用 LLM"""
+        response = await self.llm.ainvoke([{"role": "user", "content": prompt}])
+        return json.loads(response.content)
+```
+
+### 异步 vs 同步 API
+
+| API      | 方法            | 用途                       |
+| -------- | --------------- | -------------------------- |
+| 同步     | `llm.invoke()`  | 仅用于纯同步环境           |
+| 异步     | `llm.ainvoke()` | **推荐使用**，用于异步环境 |
+| 流式同步 | `llm.stream()`  | 同步流式响应               |
+| 流式异步 | `llm.astream()` | **推荐使用**，异步流式响应 |
+
+## 模型初始化规范
+
+### 使用 init_chat_model（LangChain V1 标准方式）
+
+**统一使用 `init_chat_model` 创建模型**，这是 LangChain V1 推荐的标准方式：
+
+```python
+from langchain.chat_models import init_chat_model
+from config import settings
+
+# ✅ 推荐：使用 init_chat_model 和配置管理
+llm = init_chat_model(
+    model=settings.LLM_MODEL,  # 默认: "gpt-4o"
+    model_provider="openai",  # 指定模型提供商
+    temperature=settings.LLM_TEMPERATURE,  # 默认: 0.0
+    api_key=settings.OPENAI_API_KEY,
+    timeout=30.0,  # 设置超时
+    max_retries=3,  # 重试次数
+)
+```
+
+### 支持的模型提供商
+
+`init_chat_model` 支持多种模型提供商：
+
+- `"openai"` - OpenAI 模型（GPT-4o, GPT-4o-mini 等）
+- `"anthropic"` - Anthropic Claude 模型
+- `"azure"` - Azure OpenAI 模型
+- `"google"` - Google Gemini 模型
+- `"bedrock"` - AWS Bedrock 模型
+
+### 消息格式（LangChain V1）
+
+LangChain V1 使用标准的消息格式：
+
+```python
+# ✅ 正确：使用字典格式
+messages = [
+    {"role": "user", "content": "提取公司信息"},
+    {"role": "assistant", "content": "..."},
+    {"role": "user", "content": "继续"}
+]
+
+# ✅ 异步调用
+response = await llm.ainvoke(messages)
+
+# ✅ 同步调用（不推荐，除非必须）
+response = llm.invoke(messages)
+```
+
+### 结构化输出
+
+LangChain V1 支持使用 Pydantic 模型进行结构化输出：
+
+```python
+from pydantic import BaseModel
+from langchain.chat_models import init_chat_model
+
+class CompanyInfo(BaseModel):
+    domain: str
+    industry: str
+
+llm = init_chat_model(
+    model="gpt-4o",
+    model_provider="openai",
+)
+
+# 使用 with_structured_output 获取结构化数据
+structured_llm = llm.with_structured_output(CompanyInfo)
+result = await structured_llm.ainvoke("提取公司信息")
+# result 是 CompanyInfo 实例，无需手动 JSON 解析
+```
+
+## Prompt 管理规范
+
+### Prompt 组织
+
+1. **将 Prompt 模板放在独立的 `prompts.py` 文件中**
+
+```python
+# findkp/prompts.py
+EXTRACT_COMPANY_INFO_PROMPT = """
+从以下搜索结果中提取公司的官方域名和行业信息。
+
+搜索结果:
+{search_results}
+
+请以 JSON 格式返回:
+{{
+    "domain": "公司域名",
+    "industry": "行业"
+}}
+"""
+```
+
+2. **使用格式化的字符串模板**
+
+```python
+from .prompts import EXTRACT_COMPANY_INFO_PROMPT
+
+# 格式化 Prompt
+formatted_prompt = EXTRACT_COMPANY_INFO_PROMPT.format(
+    search_results=json.dumps(results, ensure_ascii=False)
+)
+
+# 调用 LLM
+response = await llm.ainvoke([{"role": "user", "content": formatted_prompt}])
+```
+
+### Prompt 设计原则
+
+1. **明确角色和任务**：清楚说明 LLM 的角色和需要完成的任务
+2. **提供示例**：复杂任务提供 few-shot 示例
+3. **结构化输出要求**：明确指定输出格式（JSON、列表等）
+4. **错误处理指引**：说明如何处理边界情况
+5. **避免歧义**：使用清晰的指令，避免模糊表达
+
+## Agent 开发规范（未来扩展）
+
+### create_agent 使用方式
+
+当需要构建智能体时，使用 `create_agent()` 作为标准入口：
+
+```python
+from langchain import create_agent
+from langchain.chat_models import init_chat_model
+from langchain.tools import tool
+
+# 定义工具
+@tool
+async def search_company(name: str) -> str:
+    """搜索公司信息"""
+    # 异步工具实现
+    result = await search_api(name)
+    return result
+
+# 使用 init_chat_model 创建 LLM
+llm = init_chat_model(
+    model="gpt-4o",
+    model_provider="openai",
+    temperature=0,
+)
+
+# 创建智能体
+agent = create_agent(
+    llm=llm,
+    tools=[search_company],
+    system_prompt="你是一个专业的公司信息查找助手",
+)
+
+# 异步调用智能体
+result = await agent.ainvoke({
+    "messages": [("user", "帮我查找 Apple 公司的信息")]
+})
+```
+
+### 中间件机制
+
+LangChain V1 支持中间件机制，用于在模型调用前后添加通用逻辑：
+
+```python
+from langchain.middleware import BeforeModel
+
+# 自定义中间件
+class LoggingMiddleware:
+    async def __call__(self, call, args, kwargs):
+        logger.info(f"调用 LLM: {args}")
+        result = await call(*args, **kwargs)
+        logger.info(f"LLM 返回: {result}")
+        return result
+
+# 使用中间件
+llm = init_chat_model(
+    model="gpt-4o",
+    model_provider="openai",
+)
+agent = create_agent(
+    llm=llm,
+    tools=[...],
+    middleware=[LoggingMiddleware()],
+)
+```
+
+### 参数命名变化（V1）
+
+注意 LangChain V1 的参数命名变化：
+
+- ❌ `prompt` → ✅ `system_prompt`（在 create_agent 中）
+- ✅ `messages` 格式保持一致
+- ✅ `model`, `temperature`, `api_key` 等参数保持不变
+
+## 错误处理和重试
+
+### 配置重试机制
+
+```python
+from langchain.chat_models import init_chat_model
+
+llm = init_chat_model(
+    model="gpt-4o",
+    model_provider="openai",
+    max_retries=3,  # 最大重试次数
+    timeout=30.0,   # 请求超时时间
+)
+```
+
+### 异常处理
+
+```python
+from langchain_core.exceptions import LangChainException
+
+async def extract_with_llm(self, prompt: str) -> dict:
+    try:
+        response = await self.llm.ainvoke([{"role": "user", "content": prompt}])
+        return json.loads(response.content)
+    except json.JSONDecodeError as e:
+        logger.error(f"LLM 返回的 JSON 解析失败: {e}")
+        logger.debug(f"原始响应: {response.content}")
+        return {}
+    except LangChainException as e:
+        logger.error(f"LangChain 调用失败: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"LLM 提取信息失败: {e}", exc_info=True)
+        return {}
+```
+
+## 性能优化建议
+
+### 1. 使用流式响应（适合长时间任务）
+
+```python
+# 异步流式响应
+async def stream_response(prompt: str):
+    async for chunk in llm.astream([{"role": "user", "content": prompt}]):
+        print(chunk.content, end="", flush=True)
+```
+
+### 2. 批量处理
+
+```python
+# 批量调用 LLM
+prompts = [prompt1, prompt2, prompt3]
+responses = await llm.ainvoke_batch([{"role": "user", "content": p} for p in prompts])
+```
+
+### 3. 缓存机制
+
+```python
+from langchain.cache import InMemoryCache
+from langchain.globals import set_llm_cache
+
+# 启用缓存
+set_llm_cache(InMemoryCache())
+
+# 相同的 Prompt 会被缓存，避免重复调用
+```
+
+### 4. Token 使用优化
+
+- 合理设置 `max_tokens` 限制
+- 使用更小的模型处理简单任务（如 gpt-4o-mini）
+- 压缩 Prompt 长度，移除不必要的上下文
+
+## 成本管理
+
+### 模型选择策略
+
+```python
+from langchain.chat_models import init_chat_model
+
+# 简单任务使用小模型
+simple_llm = init_chat_model(
+    model="gpt-4o-mini",
+    model_provider="openai",
+    temperature=0,
+)
+
+# 复杂任务使用大模型
+complex_llm = init_chat_model(
+    model="gpt-4o",
+    model_provider="openai",
+    temperature=0.7,
+)
+```
+
+### 监控 Token 使用
+
+```python
+# 计算 Token 数量
+from langchain.chat_models import init_chat_model
+
+llm = init_chat_model(
+    model="gpt-4o",
+    model_provider="openai",
+)
+response = await llm.ainvoke([{"role": "user", "content": prompt}])
+
+# 访问 Token 使用信息（从 response_metadata 获取）
+print(f"Prompt tokens: {response.response_metadata.get('token_usage', {}).get('prompt_tokens')}")
+print(f"Completion tokens: {response.response_metadata.get('token_usage', {}).get('completion_tokens')}")
+
+# 或者使用 UsageMetadataCallbackHandler 跟踪聚合 Token 使用
+from langchain_core.callbacks import UsageMetadataCallbackHandler
+
+callback = UsageMetadataCallbackHandler()
+response = await llm.ainvoke(
+    [{"role": "user", "content": prompt}],
+    config={"callbacks": [callback]}
+)
+print(callback.usage_metadata)
+```
+
+## 测试和调试
+
+### Mock LLM 响应（测试）
+
+```python
+from unittest.mock import AsyncMock
+from langchain_core.messages import AIMessage
+
+# 在测试中 Mock LLM
+async def test_extract_company_info():
+    service = FindKPService()
+    service.llm.ainvoke = AsyncMock(return_value=AIMessage(
+        content='{"domain": "example.com", "industry": "Technology"}'
+    ))
+
+    result = await service.extract_with_llm("...")
+    assert result["domain"] == "example.com"
+```
+
+### 调试模式
+
+```python
+# 启用详细日志
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+# 在开发环境中打印完整响应
+if settings.DEBUG:
+    logger.debug(f"LLM 完整响应: {response.model_dump()}")
+```
+
+## 代码组织检查清单
+
+在使用 LangChain 时，确保：
+
+- [ ] **使用异步 API**：优先使用 `ainvoke()` 而不是 `invoke()`
+- [ ] **Prompt 模板化**：将 Prompt 放在 `prompts.py` 文件中
+- [ ] **结构化输出**：使用 `with_structured_output()` 或明确的 JSON 格式
+- [ ] **错误处理**：捕获和处理 LangChain 异常
+- [ ] **配置管理**：LLM 配置通过 `settings` 访问
+- [ ] **日志记录**：记录 LLM 调用和响应（敏感信息需脱敏）
+- [ ] **超时和重试**：配置合理的超时和重试策略
+- [ ] **模型选择**：根据任务复杂度选择合适的模型
+
+## 迁移指南
+
+### 从 LangChain 0.x 迁移到 V1
+
+1. **更新依赖**：
+
+   ```bash
+   uv add "langchain>=1.0.3" "langchain-openai>=0.3.0"
+   ```
+
+2. **检查参数命名**：
+
+   - `prompt` → `system_prompt`（在 create_agent 中）
+   - 其他参数基本保持不变
+
+3. **更新导入路径**：
+
+```python
+# V1 标准导入（推荐）
+from langchain.chat_models import init_chat_model
+from langchain import create_agent
+
+# 旧方式（不推荐，但兼容）
+# from langchain_openai import ChatOpenAI  # ❌ 已废弃，使用 init_chat_model
+```
+
+4. **测试验证**：全面测试确保功能正常
+
+## 最佳实践总结
+
+1. **统一使用 init_chat_model**：使用 LangChain V1 标准方式创建模型，而不是直接使用 `ChatOpenAI`
+2. **默认异步**：所有 LLM 调用使用 `ainvoke()` 等异步方法
+3. **明确架构**：简单任务用 `init_chat_model`，复杂任务用 `create_agent`
+4. **Prompt 分离**：将 Prompt 模板独立管理
+5. **结构化输出**：优先使用 Pydantic 模型或明确的 JSON 格式
+6. **错误处理**：完整的异常处理和日志记录
+7. **性能优化**：合理使用缓存、批量处理和模型选择
+8. **成本控制**：监控 Token 使用，选择合适的模型

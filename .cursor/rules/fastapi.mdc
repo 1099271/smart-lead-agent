@@ -1,0 +1,507 @@
+---
+alwaysApply: true
+---
+
+# FastAPI 开发最佳实践
+
+本文档基于 Smart Lead Agent 项目的实际架构，定义了 FastAPI 开发的最佳实践和规范。
+
+## 项目架构模式
+
+本项目采用 **Router + Service + Repository** 三层架构模式，遵循关注点分离原则：
+
+```
+FastAPI 应用层 (main.py)
+    ↓
+路由层 (router.py) - 处理 HTTP 请求/响应
+    ↓
+服务层 (service.py) - 业务逻辑实现
+    ↓
+仓储层 (repository.py) - 数据访问封装
+    ↓
+ORM 模型层 (models.py) - 数据库表映射
+```
+
+## 路由组织规范
+
+### 模块化路由设计
+
+每个业务板块（如 FindKP, MailManager, Writer）都应该：
+
+1. **使用 APIRouter 创建独立路由**
+
+```python
+from fastapi import APIRouter
+
+router = APIRouter(prefix="/findkp", tags=["FindKP"])
+```
+
+2. **在 main.py 中注册路由**
+
+```python
+from findkp.router import router as findkp_router
+
+app.include_router(findkp_router)
+```
+
+3. **路由命名规范**
+   - 路由前缀使用小写字母，多个单词用单数形式：`/findkp`, `/mail_manager`, `/writer`
+   - Tags 使用 PascalCase：`["FindKP"]`, `["MailManager"]`
+
+### 端点设计原则
+
+1. **RESTful 风格**：优先使用标准 HTTP 方法（GET, POST, PUT, DELETE）
+2. **语义化路径**：路径应该清晰表达资源或操作
+
+   - 查询：`GET /findkp/companies/{company_id}`
+   - 搜索：`POST /findkp/search`
+   - 创建：`POST /findkp/companies`
+   - 健康检查：`GET /findkp/health`
+
+3. **响应模型**：所有端点必须使用 `response_model` 指定返回类型
+
+```python
+@router.post("/search", response_model=FindKPResponse)
+async def find_kp(request: CompanyQuery, db: Session = Depends(get_db)):
+    ...
+```
+
+## 依赖注入规范
+
+### 数据库会话管理
+
+**必须使用依赖注入获取异步数据库会话**，使用 `Depends(get_db)` 和 `AsyncSession`：
+
+```python
+from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from database.connection import get_db
+
+@router.post("/search")
+async def find_kp(
+    request: CompanyQuery,
+    db: AsyncSession = Depends(get_db)  # ✅ 正确：使用异步依赖注入
+):
+    result = await service.find_kps(request.company_name, db)
+    return result
+```
+
+**禁止在路由函数中直接创建数据库会话**：
+
+```python
+# ❌ 错误：直接创建会话
+db = AsyncSessionLocal()
+
+# ❌ 错误：使用同步 Session
+db: Session = Depends(get_db)
+```
+
+### 配置管理依赖
+
+如果需要访问配置，使用全局 `settings` 实例：
+
+```python
+from config import settings
+
+# 在服务层使用
+llm = ChatOpenAI(
+    model=settings.LLM_MODEL,
+    temperature=settings.LLM_TEMPERATURE,
+    api_key=settings.OPENAI_API_KEY
+)
+```
+
+## Pydantic 模型规范
+
+### 模型组织
+
+1. **全局共享模型放在 `schemas/` 目录**
+
+   - `schemas/base.py`: 基础响应模型（BaseResponse）
+   - `schemas/contact.py`: 业务相关的模型（KPInfo, FindKPResponse）
+
+2. **模块特定模型放在模块目录**（如果仅在该模块使用）
+
+### 模型命名规范
+
+- **请求模型**：使用动词或名词 + Query/Request，如 `CompanyQuery`, `CreateMailRequest`
+- **响应模型**：使用名词 + Response，如 `FindKPResponse`, `MailStatusResponse`
+- **数据模型**：使用名词，如 `KPInfo`, `CompanyInfo`
+
+### 模型设计原则
+
+1. **继承 BaseResponse 统一响应格式**
+
+```python
+class FindKPResponse(BaseResponse):
+    """继承基础响应模型"""
+    company_id: int
+    company_domain: Optional[str] = None
+    contacts: List[KPInfo] = []
+```
+
+2. **使用类型提示和验证**
+
+```python
+from pydantic import BaseModel, EmailStr, HttpUrl
+from typing import Optional, List
+
+class KPInfo(BaseModel):
+    email: EmailStr  # ✅ 使用 EmailStr 进行验证
+    role: Optional[str] = None  # ✅ 使用 Optional 标记可选字段
+    linkedin_url: Optional[HttpUrl] = None  # ✅ 使用 HttpUrl 验证 URL
+```
+
+3. **使用默认值和描述**
+
+```python
+class KPInfo(BaseModel):
+    confidence_score: float = 0.0  # ✅ 提供默认值
+    department: Optional[str] = None  # 采购/销售
+```
+
+## 错误处理规范
+
+### 异常处理策略
+
+1. **路由层捕获异常并转换为 HTTP 响应**
+
+```python
+@router.post("/search", response_model=FindKPResponse)
+async def find_kp(request: CompanyQuery, db: AsyncSession = Depends(get_db)):
+    try:
+        result = await service.find_kps(request.company_name, db)
+        return FindKPResponse(...)
+    except Exception as e:
+        logger.error(f"FindKP 请求失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"搜索失败: {str(e)}")
+```
+
+2. **使用适当的 HTTP 状态码**
+
+   - `200`: 成功
+   - `400`: 客户端错误（参数验证失败）
+   - `404`: 资源未找到
+   - `500`: 服务器内部错误
+   - `503`: 服务不可用
+
+3. **记录详细错误日志**
+
+```python
+logger.error(f"操作失败: {e}", exc_info=True)  # exc_info=True 记录堆栈跟踪
+```
+
+### 验证错误处理
+
+FastAPI 自动处理 Pydantic 验证错误，返回 422 状态码。如需自定义：
+
+```python
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()}
+    )
+```
+
+## 日志记录规范
+
+### 日志配置
+
+在 `main.py` 中配置全局日志：
+
+```python
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+```
+
+### 日志使用
+
+1. **在路由层记录请求和响应**
+
+```python
+logger.info(f"收到 FindKP 请求: {request.company_name}")
+logger.info(f"FindKP 请求成功: 找到 {len(result['contacts'])} 个联系人")
+```
+
+2. **在服务层记录关键操作**
+
+```python
+logger.info(f"开始搜索公司: {company_name}")
+logger.debug(f"LLM 提取结果: {result}")
+```
+
+3. **记录级别选择**
+   - `DEBUG`: 详细的调试信息（LLM 响应、中间结果）
+   - `INFO`: 重要的业务流程节点（请求接收、成功完成）
+   - `WARNING`: 警告信息（降级处理、重试）
+   - `ERROR`: 错误信息（异常捕获、操作失败）
+
+## 异步处理规范
+
+### 默认使用异步原则
+
+**本项目默认所有路由函数和服务层函数都应使用 async/await**，充分利用 FastAPI 的异步特性提升并发性能。
+
+### 路由函数：必须使用 async
+
+**所有路由函数必须使用 async def**：
+
+```python
+# ✅ 正确：默认使用 async
+@router.post("/search", response_model=FindKPResponse)
+async def find_kp(request: CompanyQuery, db: AsyncSession = Depends(get_db)):
+    result = await service.find_kps(request.company_name, db)
+    return result
+
+# ❌ 错误：使用同步函数
+@router.post("/search", response_model=FindKPResponse)
+def find_kp(request: CompanyQuery, db: Session = Depends(get_db)):
+    ...
+```
+
+### 服务层：默认使用 async
+
+**服务层函数应使用 async def，并配合异步数据库操作**：
+
+```python
+# service.py
+class FindKPService:
+    async def find_kps(self, company_name: str, db: AsyncSession) -> dict:
+        """异步服务方法"""
+        company = await repository.get_or_create_company(db, company_name)
+        # ... 其他异步操作
+        return result
+```
+
+### 数据库操作：使用异步会话
+
+**使用 SQLAlchemy 的异步 API（AsyncSession）**：
+
+```python
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
+
+# 创建异步数据库引擎
+engine = create_async_engine(
+    f"mysql+aiomysql://{user}:{password}@{host}:{port}/{db_name}",
+    pool_pre_ping=True
+)
+
+# 创建异步会话工厂
+AsyncSessionLocal = sessionmaker(
+    engine, class_=AsyncSession, expire_on_commit=False
+)
+
+# 异步依赖注入
+async def get_db() -> AsyncSession:
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+# 在路由中使用
+@router.post("/search")
+async def find_kp(request: CompanyQuery, db: AsyncSession = Depends(get_db)):
+    result = await service.find_kps(request.company_name, db)
+    return result
+```
+
+### I/O 密集型操作：必须使用 async
+
+以下操作**必须**使用异步：
+
+- ✅ **数据库查询**：使用 `AsyncSession` 和 `await`
+- ✅ **HTTP 请求**：使用 `httpx.AsyncClient` 或 `aiohttp`
+- ✅ **文件操作**：使用 `aiofiles`
+- ✅ **外部 API 调用**：使用异步 HTTP 客户端
+
+```python
+import httpx
+
+async def call_external_api(url: str) -> dict:
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url)
+        return response.json()
+```
+
+### CPU 密集型操作处理
+
+对于 CPU 密集型操作，使用 `asyncio.to_thread()` 或 `run_in_executor()` 避免阻塞事件循环：
+
+```python
+import asyncio
+
+async def heavy_computation(data: str) -> str:
+    # 将 CPU 密集型操作放到线程池执行
+    result = await asyncio.to_thread(cpu_intensive_function, data)
+    return result
+```
+
+### 异步调用链
+
+保持异步调用链的完整性：
+
+```python
+# router.py - 异步路由
+@router.post("/search")
+async def find_kp(request: CompanyQuery, db: AsyncSession = Depends(get_db)):
+    # ✅ 使用 await 调用异步服务
+    result = await service.find_kps(request.company_name, db)
+    return result
+
+# service.py - 异步服务
+async def find_kps(self, company_name: str, db: AsyncSession) -> dict:
+    # ✅ 使用 await 调用异步仓储
+    company = await repository.get_or_create_company(db, company_name)
+    # ✅ 使用 await 调用异步 HTTP 请求
+    search_result = await self._search_company(company_name)
+    return result
+
+# repository.py - 异步仓储
+async def get_or_create_company(
+    self, db: AsyncSession, company_name: str
+) -> Company:
+    # ✅ 使用 await 执行异步数据库查询
+    result = await db.execute(select(Company).filter(...))
+    return result.scalar_one_or_none()
+```
+
+## 配置管理规范
+
+### 使用 Pydantic Settings
+
+所有配置通过 `config.py` 中的 `Settings` 类管理：
+
+```python
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    DB_HOST: str
+    DB_PORT: int = 3306  # ✅ 提供默认值
+    OPENAI_API_KEY: str
+
+    class Config:
+        env_file = ".env"
+```
+
+### 配置访问
+
+使用全局 `settings` 实例，而不是直接读取环境变量：
+
+```python
+from config import settings
+
+# ✅ 正确
+llm = ChatOpenAI(api_key=settings.OPENAI_API_KEY)
+
+# ❌ 错误
+import os
+api_key = os.getenv("OPENAI_API_KEY")
+```
+
+## API 文档规范
+
+### 自动文档生成
+
+FastAPI 自动生成 API 文档，访问：
+
+- Swagger UI: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
+
+### 文档增强
+
+1. **使用 docstring 描述端点**
+
+```python
+@router.post("/search", response_model=FindKPResponse)
+async def find_kp(request: CompanyQuery, db: Session = Depends(get_db)):
+    """
+    搜索公司的关键联系人(KP)
+
+    Args:
+        request: 包含公司名称的请求
+        db: 数据库会话
+
+    Returns:
+        FindKPResponse: 包含公司信息和联系人列表
+
+    Raises:
+        HTTPException: 当搜索失败时抛出 500 错误
+    """
+    ...
+```
+
+2. **使用 Field 描述模型字段**
+
+```python
+from pydantic import Field
+
+class CompanyQuery(BaseModel):
+    company_name: str = Field(..., description="要搜索的公司名称", example="Apple Inc.")
+```
+
+## 健康检查端点
+
+每个模块都应该提供健康检查端点：
+
+```python
+@router.get("/health")
+async def health_check():
+    """模块健康检查端点"""
+    return {"status": "healthy", "module": "FindKP"}
+```
+
+全局健康检查在 `main.py` 中：
+
+```python
+@app.get("/health")
+async def health_check():
+    """全局健康检查端点"""
+    return {"status": "healthy", "message": "Smart Lead Agent is running"}
+```
+
+## 代码组织检查清单
+
+在实现新的 API 端点前，确保：
+
+- [ ] 路由使用 `APIRouter` 并在 `main.py` 注册
+- [ ] **路由函数必须使用 `async def` 并指定 `response_model`**
+- [ ] **数据库会话使用 `AsyncSession` 并通过 `Depends(get_db)` 注入**
+- [ ] **服务层函数使用 `async def`，调用时使用 `await`**
+- [ ] **数据库操作使用 `AsyncSession` 和 `await`，通过 `repository.py` 进行**
+- [ ] **HTTP 请求使用异步客户端（`httpx.AsyncClient` 或 `aiohttp`）**
+- [ ] 请求/响应模型定义在 `schemas/` 目录
+- [ ] 异常被捕获并转换为适当的 HTTP 响应
+- [ ] 关键操作有日志记录
+- [ ] 配置通过 `settings` 访问
+- [ ] 端点有 docstring 文档说明
+
+## 性能优化建议
+
+1. **异步优先**：默认使用异步操作可显著提升并发性能，特别是在 I/O 密集型场景下
+2. **连接池配置**：异步数据库引擎使用 `pool_pre_ping=True` 保持连接健康
+3. **依赖缓存**：配置使用 `@lru_cache()` 缓存，避免重复实例化
+4. **响应压缩**：考虑添加 gzip 中间件（如果响应较大）
+5. **请求超时**：为长时间运行的操作设置超时，避免资源占用
+6. **并发控制**：对于需要限制并发的操作，使用 `asyncio.Semaphore`
+
+## 安全最佳实践
+
+1. **敏感信息**：API 密钥等敏感信息存储在 `.env` 文件，不要提交到版本控制
+2. **输入验证**：依赖 Pydantic 自动验证，必要时添加自定义验证器
+3. **SQL 注入防护**：使用 SQLAlchemy ORM，避免原始 SQL 查询
+4. **CORS 配置**：生产环境配置适当的 CORS 策略
