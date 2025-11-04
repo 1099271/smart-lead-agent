@@ -23,14 +23,23 @@ class Settings(BaseSettings):
     SERPER_API_KEY: str
     OPENAI_API_KEY: str
 
+    # OpenRouter 配置（用于国外 API：OpenAI、Anthropic 等）
+    OPENROUTER_API_KEY: str = ""  # 可选，如果为空则使用 OPENAI_API_KEY
+    OPENROUTER_SITE_URL: str = ""  # 可选，用于 OpenRouter 排名
+    OPENROUTER_SITE_NAME: str = ""  # 可选，用于 OpenRouter 排名
+
+    # 国内 API 配置
+    DEEPSEEK_API_KEY: str = ""  # DeepSeek API Key（使用 langchain-deepseek）
+
     # LangChain 配置
     LLM_MODEL: str = "gpt-4o"
     LLM_TEMPERATURE: float = 0.0
 
-    class Config:
-        # Pydantic-settings 配置,指定环境变量文件的位置
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",  # 允许 .env 文件中有额外的配置项（如邮件配置等）
+    }
 
 
 @lru_cache()

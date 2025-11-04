@@ -1,11 +1,13 @@
 """FindKP 业务逻辑服务"""
+
 import httpx
 import json
 import logging
 from typing import List, Dict
-from langchain.chat_models import init_chat_model
+from llm import get_llm
 from config import settings
 from database.repository import Repository
+from database.models import CompanyStatus
 from schemas.contact import KPInfo
 from .prompts import EXTRACT_COMPANY_INFO_PROMPT, EXTRACT_CONTACTS_PROMPT
 
@@ -18,13 +20,8 @@ class FindKPService:
     """FindKP 服务类,负责搜索和提取公司 KP 信息"""
 
     def __init__(self):
-        # 使用 LangChain V1 的 init_chat_model（标准方式）
-        self.llm = init_chat_model(
-            model=settings.LLM_MODEL,
-            model_provider="openai",
-            temperature=settings.LLM_TEMPERATURE,
-            api_key=settings.OPENAI_API_KEY,
-        )
+        # 使用统一的 LLM 工厂函数（自动路由到 OpenRouter 或直接调用）
+        self.llm = get_llm()
         self.http_client = httpx.Client(timeout=30.0)
 
     def __del__(self):
@@ -105,7 +102,7 @@ class FindKPService:
             company = repo.get_or_create_company(company_name)
             company.domain = company_info.get("domain")
             company.industry = company_info.get("industry")
-            company.status = "processing"
+            company.status = CompanyStatus.processing
             db.commit()
             logger.info(f"公司记录已创建/更新: {company.name}")
 
@@ -172,9 +169,11 @@ class FindKPService:
                     continue
 
             # 6. 更新公司状态
-            company.status = "completed"
+            company.status = CompanyStatus.completed
             db.commit()
-            logger.info(f"FindKP 流程完成: {company_name}, 找到 {len(all_contacts)} 个联系人")
+            logger.info(
+                f"FindKP 流程完成: {company_name}, 找到 {len(all_contacts)} 个联系人"
+            )
 
             return {
                 "company_id": company.id,
@@ -187,9 +186,8 @@ class FindKPService:
             # 更新公司状态为失败
             try:
                 company = repo.get_or_create_company(company_name)
-                company.status = "failed"
+                company.status = CompanyStatus.failed
                 db.commit()
             except Exception:
                 pass
             raise
-
