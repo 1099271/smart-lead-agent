@@ -9,6 +9,7 @@ dependencies = [
     "uvicorn[standard]>=0.24.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
+    "email-validator>=2.0.0",
     "sqlalchemy>=2.0.0",
     "pymysql>=1.1.0",
     "python-dotenv>=1.0.0",
@@ -16,6 +17,7 @@ dependencies = [
     "langchain>=1.0.3",
     "langgraph>=1.0.2",
     "langchain-deepseek>=1.0.0",
+    "aiomysql>=0.3.2",
 ]
 
 [project.optional-dependencies]

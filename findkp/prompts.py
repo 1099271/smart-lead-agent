@@ -3,6 +3,8 @@
 EXTRACT_COMPANY_INFO_PROMPT = """
 从以下搜索结果中提取公司的官方域名和行业信息。
 
+{country_context}
+
 搜索结果:
 {search_results}
 
@@ -17,6 +19,8 @@ EXTRACT_COMPANY_INFO_PROMPT = """
 
 EXTRACT_CONTACTS_PROMPT = """
 从以下搜索结果中提取{department}部门的关键联系人信息。
+
+{country_context}
 
 搜索结果:
 {search_results}
@@ -38,5 +42,5 @@ EXTRACT_CONTACTS_PROMPT = """
 2. 避免通用邮箱如 contact@, info@, sales@
 3. confidence_score 根据信息的完整性和可靠性评分(0-1)
 4. 如果找不到联系人,返回空数组 []
+5. 优先提取与{country_context}相关的联系人信息
 """
-

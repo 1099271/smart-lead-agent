@@ -1,4 +1,5 @@
 """联系人相关数据模型"""
+
 from pydantic import BaseModel, EmailStr, HttpUrl
 from typing import Optional, List
 from .base import BaseResponse
@@ -8,6 +9,7 @@ class CompanyQuery(BaseModel):
     """FindKP API 输入"""
 
     company_name: str
+    country: Optional[str] = None
 
 
 class KPInfo(BaseModel):
@@ -29,4 +31,3 @@ class FindKPResponse(BaseResponse):
     company_id: int
     company_domain: Optional[str] = None
     contacts: List[KPInfo] = []
-

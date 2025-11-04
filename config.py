@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     SERPER_API_KEY: str
     OPENAI_API_KEY: str
 
+    # Google Search API 配置
+    GOOGLE_SEARCH_API_KEY: str = ""  # Google Custom Search API Key
+    GOOGLE_SEARCH_CX: str = ""  # Google Custom Search Engine ID
+
     # OpenRouter 配置（用于国外 API：OpenAI、Anthropic 等）
     OPENROUTER_API_KEY: str = ""  # 可选，如果为空则使用 OPENAI_API_KEY
     OPENROUTER_SITE_URL: str = ""  # 可选，用于 OpenRouter 排名

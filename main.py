@@ -1,6 +1,5 @@
 import logging
 from fastapi import FastAPI
-from database.connection import engine, Base
 from findkp.router import router as findkp_router
 
 # 设置日志
@@ -9,9 +8,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-# 创建数据库表（如果不存在）
-Base.metadata.create_all(bind=engine)
 
 # 创建 FastAPI 应用实例
 app = FastAPI(
