@@ -80,7 +80,7 @@ class ResultAggregator:
             is_duplicate_title = False
             for seen_title in seen_titles:
                 if title_lower in seen_title or seen_title in title_lower:
-                    # 保留snippet更长的版本
+                    # 找到对应的已存在结果
                     existing_result = next(
                         (r for r in deduplicated if r.title.lower() == seen_title),
                         None,
@@ -92,7 +92,18 @@ class ResultAggregator:
                             deduplicated.append(result)
                             seen_titles.remove(seen_title)
                             seen_titles.add(title_lower)
-                    is_duplicate_title = True
+                            # 否则保留已存在的结果（snippet更长或相等）
+                            # 标记为重复，跳过当前结果
+                            is_duplicate_title = True
+                        else:
+                            # 如果没找到对应的结果，说明数据不一致
+                            # 记录警告，但不跳过（可能是真正的重复，也可能是不一致）
+                            logger.warning(
+                                f"检测到标题相似但未找到对应的已存在结果: "
+                                f"seen_title='{seen_title}', current_title='{title_lower}'. "
+                                f"跳过标题去重检查，继续处理URL去重。"
+                            )
+                            # 不设置 is_duplicate_title，继续处理
                     break
 
             if is_duplicate_title:
@@ -122,4 +133,3 @@ class ResultAggregator:
         # 当前实现：保持原始顺序
         # 可以后续优化：根据关键词匹配度、snippet质量等排序
         return results
-
