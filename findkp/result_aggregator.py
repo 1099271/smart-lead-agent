@@ -86,25 +86,28 @@ class ResultAggregator:
                         None,
                     )
                     if existing_result:
+                        # 找到了已存在的结果，比较snippet长度
                         if len(result.snippet) > len(existing_result.snippet):
                             # 替换为snippet更长的版本
                             deduplicated.remove(existing_result)
                             deduplicated.append(result)
                             seen_titles.remove(seen_title)
                             seen_titles.add(title_lower)
-                            # 否则保留已存在的结果（snippet更长或相等）
+                            # 替换后不标记为重复，因为已经用新结果替换了旧结果
+                        else:
+                            # 保留已存在的结果（snippet更长或相等）
                             # 标记为重复，跳过当前结果
                             is_duplicate_title = True
-                        else:
-                            # 如果没找到对应的结果，说明数据不一致
-                            # 记录警告，但不跳过（可能是真正的重复，也可能是不一致）
-                            logger.warning(
-                                f"检测到标题相似但未找到对应的已存在结果: "
-                                f"seen_title='{seen_title}', current_title='{title_lower}'. "
-                                f"跳过标题去重检查，继续处理URL去重。"
-                            )
-                            # 不设置 is_duplicate_title，继续处理
-                    break
+                    else:
+                        # 如果没找到对应的结果，说明数据不一致
+                        # 记录警告，但不跳过（可能是真正的重复，也可能是不一致）
+                        logger.warning(
+                            f"检测到标题相似但未找到对应的已存在结果: "
+                            f"seen_title='{seen_title}', current_title='{title_lower}'. "
+                            f"跳过标题去重检查，继续处理URL去重。"
+                        )
+                        # 不设置 is_duplicate_title，继续处理
+                    break  # 找到匹配的标题后，退出循环
 
             if is_duplicate_title:
                 logger.debug(f"跳过重复标题: {result.title}")
