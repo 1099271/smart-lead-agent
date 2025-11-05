@@ -34,9 +34,12 @@ class Settings(BaseSettings):
 
     # 国内 API 配置
     DEEPSEEK_API_KEY: str = ""  # DeepSeek API Key（使用 langchain-deepseek）
+    GLM_API_KEY: str = ""  # GLM（智谱AI）API Key
+    QWEN_API_KEY: str = ""  # Qwen（通义千问）API Key
+    QWEN_MODEL: str = ""  # Qwen 模型名称（如 qwen-turbo, qwen-plus, qwen-max）
 
     # LangChain 配置
-    LLM_MODEL: str = "gpt-4o"
+    LLM_MODEL: str = "deepseek-chat"
     LLM_TEMPERATURE: float = 0.0
 
     model_config = {

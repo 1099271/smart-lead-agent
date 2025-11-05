@@ -17,7 +17,9 @@ dependencies = [
     "langchain>=1.0.3",
     "langgraph>=1.0.2",
     "langchain-deepseek>=1.0.0",
+    "zhipuai>=2.0.0",
     "aiomysql>=0.3.2",
+    "click>=8.0.0",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +32,15 @@ dev = [
 
 [tool.uv]
 dev-dependencies = []
+package = true
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["cli", "core", "database", "findkp", "llm", "mail_manager", "schemas", "writer"]
+py-modules = ["config"]
 
 [tool.black]
 line-length = 88
@@ -38,4 +49,7 @@ target-version = ["py311"]
 [tool.ruff]
 line-length = 88
 target-version = "py311"
+
+[project.scripts]
+smart-lead = "cli.main:cli"
 

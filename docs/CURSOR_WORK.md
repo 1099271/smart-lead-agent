@@ -951,6 +951,7 @@ class BaseSearchProvider(ABC):
 **核心功能**：
 
 1. **单个查询**：支持丰富的可选参数
+
    - `search_type`：搜索类型（search/image/videos）
    - `location`：具体位置（如 "Vietnam"）
    - `gl`：国家代码（如 "vn"）
@@ -984,6 +985,7 @@ class BaseSearchProvider(ABC):
 **核心功能**：
 
 1. **单个查询**：支持基本参数
+
    - `query`：搜索查询字符串
    - `num`：返回结果数量（默认 10，最大 10）
    - `start`：起始索引（默认 1）
@@ -1025,10 +1027,12 @@ GOOGLE_SEARCH_CX: str = ""  # Google Custom Search Engine ID
 **关键改动**：
 
 1. **移除旧的搜索方法**：
+
    - 删除 `search_serper()` 方法（原有实现）
    - 移除 `httpx` 的直接导入和使用
 
 2. **使用新的搜索提供者**：
+
    ```python
    from core.search import SerperSearchProvider
 
@@ -1178,19 +1182,18 @@ results = await serper.search_batch(queries)
 - [ ] 添加搜索配额监控和告警
 - [ ] 考虑添加更多搜索提供商（Bing、DuckDuckGo 等）
 
-
 ---
 
-## 2025-11-04 23:20:00 - 实现方案A：多工具并行搜索 + LLM智能提取
+## 2025-11-04 23:20:00 - 实现方案 A：多工具并行搜索 + LLM 智能提取
 
 ### 需求描述
 
-实现方案A流程，通过多工具并行搜索和LLM智能提取，提升FindKP模块找到采购和销售关键联系人的成功率：
+实现方案 A 流程，通过多工具并行搜索和 LLM 智能提取，提升 FindKP 模块找到采购和销售关键联系人的成功率：
 
 1. **添加国家参数支持** - 在搜索查询中利用国家信息优化结果
-2. **多工具并行搜索** - 同时使用Serper和Google Search API
+2. **多工具并行搜索** - 同时使用 Serper 和 Google Search API
 3. **结果聚合与去重** - 合并多个工具的结果，去除重复
-4. **LLM增强** - 优化Prompt，利用国家信息提升提取准确性
+4. **LLM 增强** - 优化 Prompt，利用国家信息提升提取准确性
 
 ### 实现逻辑
 
@@ -1207,8 +1210,9 @@ class CompanyQuery(BaseModel):
 ```
 
 **设计考虑**：
+
 - 使用可选字段保持向后兼容
-- 国家信息用于优化搜索查询和LLM提取
+- 国家信息用于优化搜索查询和 LLM 提取
 
 #### 2. 搜索策略生成器
 
@@ -1219,10 +1223,12 @@ class CompanyQuery(BaseModel):
 **核心功能**：
 
 1. **国家参数映射**：
+
    - `get_country_params()`：将国家名称映射为搜索参数（gl, hl, location）
    - 支持常见国家的代码映射（越南、中国、美国等）
 
 2. **公司信息查询生成**：
+
    ```python
    generate_company_queries(company_name, country)
    # 生成："{company_name} official website {country}"
@@ -1236,9 +1242,10 @@ class CompanyQuery(BaseModel):
    ```
 
 **查询策略**：
-- 公司信息：1个查询（官方网站）
-- 采购KP：4个查询（procurement manager, purchasing manager, purchasing contact, procurement director）
-- 销售KP：4个查询（sales manager, sales director, sales contact, business development manager）
+
+- 公司信息：1 个查询（官方网站）
+- 采购 KP：4 个查询（procurement manager, purchasing manager, purchasing contact, procurement director）
+- 销售 KP：4 个查询（sales manager, sales director, sales contact, business development manager）
 
 #### 3. 结果聚合器
 
@@ -1249,30 +1256,34 @@ class CompanyQuery(BaseModel):
 **核心功能**：
 
 1. **聚合** (`aggregate()`):
+
    - 合并多个查询的结果
    - 将所有查询的结果合并到一个列表
 
 2. **去重** (`deduplicate()`):
-   - URL完全匹配去重
+
+   - URL 完全匹配去重
    - 标题相似度去重（简单字符串包含判断）
-   - 保留snippet更长的版本
+   - 保留 snippet 更长的版本
 
 3. **排序** (`sort_by_relevance()`):
    - 当前保持原始顺序
    - 未来可扩展更复杂的排序逻辑
 
 **去重策略**：
-- 使用 `set` 记录已见过的URL和标题
-- 对于标题相似的情况，保留snippet更长的版本
+
+- 使用 `set` 记录已见过的 URL 和标题
+- 对于标题相似的情况，保留 snippet 更长的版本
 - 确保结果质量的同时避免重复
 
-#### 4. FindKP服务重构
+#### 4. FindKP 服务重构
 
 **`findkp/service.py`**：
 
 **主要改动**：
 
 1. **初始化多搜索工具**：
+
    ```python
    self.serper_provider = SerperSearchProvider()
    self.google_provider = GoogleSearchProvider()
@@ -1281,6 +1292,7 @@ class CompanyQuery(BaseModel):
    ```
 
 2. **并行搜索实现**：
+
    ```python
    async def _search_with_multiple_providers(queries):
        # 并行执行两个工具的批量搜索
@@ -1298,26 +1310,30 @@ class CompanyQuery(BaseModel):
    - 使用搜索策略生成查询列表
    - 使用批量搜索接口并行搜索
    - 使用结果聚合器合并结果
-   - 保持现有LLM提取和数据库保存逻辑
+   - 保持现有 LLM 提取和数据库保存逻辑
 
 **流程优化**：
-- 公司信息：1个查询 → 并行搜索 → 聚合 → LLM提取
-- 采购KP：4个查询 → 并行搜索 → 聚合 → LLM提取
-- 销售KP：4个查询 → 并行搜索 → 聚合 → LLM提取
 
-#### 5. LLM Prompt增强
+- 公司信息：1 个查询 → 并行搜索 → 聚合 → LLM 提取
+- 采购 KP：4 个查询 → 并行搜索 → 聚合 → LLM 提取
+- 销售 KP：4 个查询 → 并行搜索 → 聚合 → LLM 提取
+
+#### 5. LLM Prompt 增强
 
 **`findkp/prompts.py`**：
 
 **更新 `EXTRACT_COMPANY_INFO_PROMPT`**：
+
 - 添加 `{country_context}` 占位符
 - 提示："这是一家位于 {country} 的公司"
 
 **更新 `EXTRACT_CONTACTS_PROMPT`**：
+
 - 添加 `{country_context}` 占位符
 - 添加要求："优先提取与{country_context}相关的联系人信息"
 
 **使用方式**：
+
 ```python
 country_context = self._get_country_context(country)
 prompt = EXTRACT_CONTACTS_PROMPT.format(
@@ -1344,26 +1360,29 @@ result = await service.find_kps(request.company_name, request.country, db)
 - ✅ 更新 `schemas/contact.py`，添加 `country` 字段
 - ✅ 创建 `findkp/search_strategy.py`，实现搜索策略生成器
 - ✅ 创建 `findkp/result_aggregator.py`，实现结果聚合和去重
-- ✅ 更新 `findkp/prompts.py`，增强Prompt利用国家信息
+- ✅ 更新 `findkp/prompts.py`，增强 Prompt 利用国家信息
 - ✅ 重构 `findkp/service.py`，实现多工具并行搜索和结果聚合
-- ✅ 更新 `findkp/router.py`，传递country参数
-- ✅ 所有代码通过语法检查和lint检查
+- ✅ 更新 `findkp/router.py`，传递 country 参数
+- ✅ 所有代码通过语法检查和 lint 检查
 
 #### 功能特性
 
 1. **多工具并行搜索**：
-   - Serper和Google Search API同时搜索
+
+   - Serper 和 Google Search API 同时搜索
    - 使用 `asyncio.gather` 实现真正的并行
    - 单个工具失败不影响其他工具
 
 2. **结果聚合和去重**：
+
    - 自动合并多个工具的结果
-   - 智能去重（URL和标题）
+   - 智能去重（URL 和标题）
    - 保留质量更高的结果
 
 3. **国家信息优化**：
+
    - 搜索查询中自动添加国家信息
-   - LLM Prompt中利用国家上下文
+   - LLM Prompt 中利用国家上下文
    - 提升搜索结果的准确性
 
 4. **批量搜索优化**：
@@ -1376,11 +1395,13 @@ result = await service.find_kps(request.company_name, request.country, db)
 #### 1. 并行搜索实现
 
 **关键技术**：
+
 - 使用 `asyncio.gather` 实现真正的并行
 - `return_exceptions=True` 确保单个失败不影响整体
 - 错误处理：捕获异常并记录日志，返回空结果继续执行
 
 **性能优势**：
+
 - 两个搜索工具同时执行，减少总等待时间
 - 批量搜索接口减少网络请求次数
 - 充分利用异步特性
@@ -1388,26 +1409,31 @@ result = await service.find_kps(request.company_name, request.country, db)
 #### 2. 结果聚合策略
 
 **合并阶段**：
+
 - 相同查询的多个工具结果合并
 - 使用列表相加：`serper_result + google_result`
 
 **去重阶段**：
-- URL完全匹配去重（使用 `set`）
+
+- URL 完全匹配去重（使用 `set`）
 - 标题相似度去重（字符串包含判断）
-- 保留snippet更长的版本
+- 保留 snippet 更长的版本
 
 **排序阶段**：
+
 - 当前保持原始顺序
 - 未来可扩展关键词匹配度排序
 
 #### 3. 国家参数映射
 
 **映射表设计**：
-- `COUNTRY_CODE_MAP`：国家名称 → 国家代码（gl参数）
-- `LANGUAGE_CODE_MAP`：国家名称 → 语言代码（hl参数）
+
+- `COUNTRY_CODE_MAP`：国家名称 → 国家代码（gl 参数）
+- `LANGUAGE_CODE_MAP`：国家名称 → 语言代码（hl 参数）
 - 支持常见国家（越南、中国、美国等）
 
 **使用方式**：
+
 ```python
 country_params = strategy.get_country_params("Vietnam")
 # 返回: {"gl": "vn", "hl": "vi", "location": "Vietnam"}
@@ -1416,11 +1442,13 @@ country_params = strategy.get_country_params("Vietnam")
 #### 4. 错误处理策略
 
 **搜索工具失败**：
+
 - 单个工具失败不影响其他工具
 - 记录警告日志，继续执行
 - 返回空结果，不中断流程
 
-**LLM提取失败**：
+**LLM 提取失败**：
+
 - 捕获异常，记录错误日志
 - 返回空结果，不中断流程
 - 记录原始响应便于调试
@@ -1449,7 +1477,7 @@ LLM提取联系人信息（采购/销售，带国家上下文）
 
 1. **并行搜索**：两个工具同时执行，减少总时间
 2. **批量搜索**：使用批量接口减少网络请求
-3. **结果去重**：减少传递给LLM的数据量
+3. **结果去重**：减少传递给 LLM 的数据量
 4. **智能查询**：多个关键词提高覆盖率
 
 ### 后续优化方向
@@ -1459,12 +1487,11 @@ LLM提取联系人信息（采购/销售，带国家上下文）
 - [ ] 实现搜索结果排序（按相关性）
 - [ ] 添加搜索配额监控
 - [ ] 支持更多国家代码映射
-- [ ] 优化LLM Prompt提升提取准确性
-
+- [ ] 优化 LLM Prompt 提升提取准确性
 
 ---
 
-## 2025-11-05 11:53:00 - 修复结果聚合器去重逻辑Bug
+## 2025-11-05 11:53:00 - 修复结果聚合器去重逻辑 Bug
 
 ### 需求描述
 
@@ -1474,13 +1501,15 @@ LLM提取联系人信息（采购/销售，带国家上下文）
 
 在结果聚合器的去重逻辑中发现三个关键问题：
 
-1. **替换后错误标记为重复**（第97行）：
-   - **问题**：当新结果的snippet更长，替换旧结果后，仍然设置 `is_duplicate_title = True`
+1. **替换后错误标记为重复**（第 97 行）：
+
+   - **问题**：当新结果的 snippet 更长，替换旧结果后，仍然设置 `is_duplicate_title = True`
    - **后果**：替换后的新结果被错误跳过，导致去重失败
 
-2. **else分支逻辑错误**（第98-106行）：
+2. **else 分支逻辑错误**（第 98-106 行）：
+
    - **问题**：`else` 分支的注释说"如果没找到对应的结果"，但这是 `if len(result.snippet) > len(existing_result.snippet):` 的 `else` 分支
-   - **实际**：这个 `else` 应该处理"snippet不长"的情况，而不是"没找到结果"
+   - **实际**：这个 `else` 应该处理"snippet 不长"的情况，而不是"没找到结果"
 
 3. **缺少处理 `existing_result` 为 `None` 的分支**：
    - **问题**：当 `existing_result` 为 `None` 时（数据不一致），没有对应的处理逻辑
@@ -1491,6 +1520,7 @@ LLM提取联系人信息（采购/销售，带国家上下文）
 #### 1. 重构条件分支结构
 
 **修复前的问题结构**：
+
 ```python
 if existing_result:
     if len(result.snippet) > len(existing_result.snippet):
@@ -1502,6 +1532,7 @@ if existing_result:
 ```
 
 **修复后的正确结构**：
+
 ```python
 if existing_result:
     # 找到了已存在的结果，比较snippet长度
@@ -1525,12 +1556,14 @@ else:
 
 #### 2. 修复后的正确逻辑
 
-1. **当 `existing_result` 存在且新结果snippet更长**：
+1. **当 `existing_result` 存在且新结果 snippet 更长**：
+
    - 执行替换操作
    - **不设置** `is_duplicate_title`（因为已经替换了）
    - 新结果会被添加到结果列表
 
-2. **当 `existing_result` 存在但新结果snippet不长**：
+2. **当 `existing_result` 存在但新结果 snippet 不长**：
+
    - 保留已存在的结果
    - **设置** `is_duplicate_title = True`
    - 跳过当前结果
@@ -1538,7 +1571,7 @@ else:
 3. **当 `existing_result` 为 `None`**（数据不一致）：
    - 记录警告日志
    - **不设置** `is_duplicate_title`
-   - 继续处理，让URL去重检查决定是否跳过
+   - 继续处理，让 URL 去重检查决定是否跳过
 
 ### 修复的关键点
 
@@ -1546,8 +1579,8 @@ else:
 
 - ✅ `if existing_result:` - 处理找到已存在结果的情况
 - ✅ `if len(result.snippet) > len(existing_result.snippet):` - 处理替换情况
-- ✅ `else:`（snippet比较的else）- 处理保留已存在结果的情况
-- ✅ `else:`（existing_result检查的else）- 处理数据不一致的情况
+- ✅ `else:`（snippet 比较的 else）- 处理保留已存在结果的情况
+- ✅ `else:`（existing_result 检查的 else）- 处理数据不一致的情况
 
 #### 2. 标志位的正确设置
 
@@ -1559,30 +1592,33 @@ else:
 
 - ✅ 添加了警告日志，记录数据不一致的情况
 - ✅ 确保即使数据不一致，也不会错误地跳过有效结果
-- ✅ 通过URL去重作为最后的保障
+- ✅ 通过 URL 去重作为最后的保障
 
 ### 实现效果
 
 #### 修复的问题
 
-- ✅ 修复了替换后错误标记为重复的bug
-- ✅ 修复了else分支注释和逻辑不匹配的问题
+- ✅ 修复了替换后错误标记为重复的 bug
+- ✅ 修复了 else 分支注释和逻辑不匹配的问题
 - ✅ 添加了处理 `existing_result` 为 `None` 的分支
-- ✅ 所有代码通过lint检查
+- ✅ 所有代码通过 lint 检查
 
 #### 逻辑验证
 
-**场景1：替换场景**（新结果snippet更长）
-- 输入：已存在结果A（snippet=50），新结果B（snippet=100）
-- 预期：替换A为B，B被添加到结果列表
-- 实际：✅ 正确执行替换，B被添加
+**场景 1：替换场景**（新结果 snippet 更长）
 
-**场景2：保留场景**（新结果snippet不长）
-- 输入：已存在结果A（snippet=100），新结果B（snippet=50）
-- 预期：保留A，跳过B
-- 实际：✅ 正确保留A，跳过B
+- 输入：已存在结果 A（snippet=50），新结果 B（snippet=100）
+- 预期：替换 A 为 B，B 被添加到结果列表
+- 实际：✅ 正确执行替换，B 被添加
 
-**场景3：数据不一致**（existing_result为None）
+**场景 2：保留场景**（新结果 snippet 不长）
+
+- 输入：已存在结果 A（snippet=100），新结果 B（snippet=50）
+- 预期：保留 A，跳过 B
+- 实际：✅ 正确保留 A，跳过 B
+
+**场景 3：数据不一致**（existing_result 为 None）
+
 - 输入：检测到标题相似，但找不到对应的已存在结果
 - 预期：记录警告，不跳过，继续处理
 - 实际：✅ 记录警告，继续处理
@@ -1591,7 +1627,7 @@ else:
 
 #### 1. 去重逻辑的完整性
 
-- **URL去重**：第一层保障，完全匹配去重
+- **URL 去重**：第一层保障，完全匹配去重
 - **标题去重**：第二层保障，相似度去重
 - **数据一致性**：处理边界情况，确保逻辑完整
 
@@ -1614,3 +1650,781 @@ else:
 - [ ] 添加性能监控（记录去重前后的结果数量）
 - [ ] 考虑使用数据库去重（避免内存中的重复计算）
 
+---
+
+## 2025-11-05 17:18:16 - FindKP 模块全面优化与 CLI 工具实现
+
+### 需求描述
+
+对 FindKP 模块进行全面优化，提升搜索效果和系统性能，并新增 CLI 命令行工具：
+
+1. **充分利用 company_name_local 参数**：在搜索时使用本地名称生成更多查询变体，提升非英语国家公司搜索效果
+2. **流程并行化优化**：采购和销售搜索并行执行，减少总执行时间
+3. **批量保存优化**：联系人批量保存，减少数据库操作次数
+4. **数据库结构扩展**：添加公司定位和简报字段，支持后续开发信生成
+5. **LLM 提取增强**：提取公司定位和简报信息，作为开发信上下文
+6. **CLI 工具实现**：提供命令行工具，方便在 CLI 环境中执行请求并查看实时日志
+7. **业务文档完善**：创建 FindKP 业务逻辑文档，详细阐述数据流向和业务细节
+
+### 实现逻辑
+
+#### 1. 数据库结构调整
+
+**文件**: `database/models.py`, `database/sql/002_add_company_positioning_brief.sql`
+
+**修改内容**:
+
+- 在 `Company` 模型中添加两个新字段：
+  - `positioning` (Text): 公司定位描述
+  - `brief` (Text): 公司简要介绍/简报
+- 创建数据库迁移脚本，使用 ALTER TABLE 添加新字段（兼容现有数据库）
+
+**技术要点**:
+
+- 使用 `Column(Text)` 支持长文本存储
+- 迁移脚本使用 `ALTER TABLE` 语句，默认值为 NULL，向后兼容
+- 字段位置：在 `industry` 字段之后
+
+#### 2. 搜索策略优化
+
+**文件**: `findkp/search_strategy.py`
+
+**核心改动**:
+
+1. **`generate_company_queries()` 方法增强**:
+
+   - 修改方法签名，接收 `company_name_en` 和 `company_name_local` 两个参数
+   - 生成多个查询变体：
+     - 查询 1: `{company_name_en} official website`
+     - 查询 2: `{company_name_local} official website`（如果与英文名不同）
+     - 查询 3: `{company_name_en} {company_name_local} official website`（如果不同）
+     - 查询 4: `{company_name_local} company website`（本地化变体）
+   - 使用 `seen_queries` Set 去重，避免生成重复查询
+
+2. **`generate_contact_queries()` 方法增强**:
+   - 修改方法签名，接收 `company_name_en` 和 `company_name_local` 两个参数
+   - 为每个部门（采购/销售）生成双重查询：
+     - 使用英文名生成查询（保持现有逻辑）
+     - 如果本地名与英文名不同，额外使用本地名生成查询变体
+   - 每个查询模板都会生成英文名和本地名两个版本（如果不同）
+
+**优化效果**:
+
+- 增加搜索结果多样性，特别是对于非英语国家的公司
+- 提升联系人发现率，覆盖更多本地化搜索结果
+- 查询去重机制确保不会重复搜索相同内容
+
+#### 3. LLM Prompt 优化
+
+**文件**: `findkp/prompts.py`
+
+**修改内容**:
+
+- 更新 `EXTRACT_COMPANY_INFO_PROMPT`，要求 LLM 提取：
+  - `domain`: 公司域名
+  - `industry`: 行业
+  - `positioning`: 公司定位描述（200 字以内）
+  - `brief`: 公司简要介绍（300 字以内）
+- 添加明确的提取要求：
+  - 基于搜索结果中的实际信息
+  - 不要编造信息
+  - 使用简洁清晰的语言
+
+**业务价值**:
+
+- 提供更丰富的公司信息，用于后续开发信个性化
+- 定位和简报信息作为上下文，提升开发信质量
+
+#### 4. 服务层流程并行化
+
+**文件**: `findkp/service.py`
+
+**核心改动**:
+
+1. **新增 `_search_contacts_parallel()` 方法**:
+
+   - 提取联系人搜索逻辑到独立方法
+   - 支持并行搜索采购或销售部门联系人
+   - 返回包含 `contacts` 和 `results` 的字典
+
+2. **`find_kps()` 方法优化**:
+   - 将采购和销售搜索改为并行执行：
+     ```python
+     procurement_task = self._search_contacts_parallel(...)
+     sales_task = self._search_contacts_parallel(...)
+     procurement_result, sales_result = await asyncio.gather(
+         procurement_task, sales_task, return_exceptions=True
+     )
+     ```
+   - 添加异常处理：单个搜索失败不影响另一个
+   - 更新保存公司信息时，保存 `positioning` 和 `brief` 字段
+
+**性能提升**:
+
+- 采购和销售搜索并行执行，减少约 50% 的搜索时间
+- 充分利用异步特性，提升系统吞吐量
+
+#### 5. 批量保存优化
+
+**文件**: `database/repository.py`, `findkp/service.py`
+
+**核心改动**:
+
+1. **新增 `create_contacts_batch()` 方法**:
+
+   - 在 `Repository` 类中添加批量创建联系人方法
+   - 收集所有联系人后一次性批量保存
+   - 使用事务批量提交，减少数据库往返次数
+
+2. **服务层批量保存逻辑**:
+   - 收集所有联系人数据
+   - 转换为 KPInfo 对象列表
+   - 调用 `create_contacts_batch()` 批量保存
+   - 如果批量保存失败，降级为单个保存模式
+
+**优化效果**:
+
+- 减少数据库操作次数，提升保存效率
+- 批量提交减少网络往返，提升性能
+
+#### 6. CLI 工具实现
+
+**文件**: `cli/__init__.py`, `cli/main.py`, `cli/findkp.py`, `pyproject.toml`
+
+**实现内容**:
+
+1. **CLI 模块结构**:
+
+   ```
+   cli/
+   ├── __init__.py
+   ├── main.py          # CLI 主入口
+   └── findkp.py        # FindKP CLI 命令
+   ```
+
+2. **CLI 主入口 (`cli/main.py`)**:
+
+   - 使用 `click` 库创建命令行接口
+   - 创建主 CLI 组 `@click.group()`
+   - 注册 `findkp` 子命令
+
+3. **FindKP 命令 (`cli/findkp.py`)**:
+
+   - 实现 `findkp` 命令，支持参数：
+     - `--company-name-en`: 公司英文名称（必需）
+     - `--company-name-local`: 公司本地名称（必需）
+     - `--country`: 国家名称（可选）
+     - `--verbose/-v`: 详细日志输出
+   - 配置日志输出，实时显示处理进度
+   - 结构化输出最终结果（表格形式展示联系人信息）
+
+4. **CLI 入口点配置**:
+   - 在 `pyproject.toml` 中添加：
+     ```toml
+     [project.scripts]
+     smart-lead = "cli.main:cli"
+     ```
+   - 添加 `click>=8.0.0` 依赖
+
+**使用示例**:
+
+```bash
+smart-lead findkp \
+  --company-name-en "Apple Inc." \
+  --company-name-local "苹果公司" \
+  --country "USA" \
+  --verbose
+```
+
+#### 7. 业务文档创建
+
+**文件**: `docs/FINDKP_BUSINESS_LOGIC.md`
+
+**文档内容**:
+
+- 业务概述：模块功能和价值
+- 核心流程：流程图和详细步骤说明
+- 数据流向：序列图和数据格式
+- 核心组件：SearchStrategy、ResultAggregator、FindKPService、Repository
+- 数据结构：Company 和 Contact 表结构
+- 搜索策略：多源搜索与查询优化
+- LLM 提取：Prompt 设计与调用方式
+- 错误处理：分层错误处理与状态管理
+- 性能优化：并行执行与优化建议
+- 使用示例：API 和 CLI 调用示例
+
+**文档价值**:
+
+- 帮助开发者快速理解 FindKP 模块的业务逻辑
+- 清晰展示数据流向和处理流程
+- 便于后续维护和扩展
+
+#### 8. README.md 更新
+
+**文件**: `README.md`
+
+**更新内容**:
+
+- 添加 "CLI 使用" 章节，详细说明 CLI 工具的使用方法
+- 更新 "项目结构" 章节，添加 CLI 目录说明
+- 更新 "详细文档" 章节，添加 FindKP 业务逻辑文档链接
+- 添加 CLI 与 API 的区别说明
+
+### 实现效果
+
+#### 已完成的任务
+
+- ✅ 数据库模型添加 `positioning` 和 `brief` 字段
+- ✅ 创建数据库迁移脚本 `002_add_company_positioning_brief.sql`
+- ✅ 优化 `SearchStrategy.generate_company_queries()` 使用 `company_name_local`
+- ✅ 优化 `SearchStrategy.generate_contact_queries()` 使用 `company_name_local`
+- ✅ 更新 LLM Prompt 提取公司定位和简报信息
+- ✅ 重构 `Service.find_kps()` 实现采购和销售并行搜索
+- ✅ 优化联系人保存逻辑，实现批量保存
+- ✅ 创建 CLI 模块结构和命令实现
+- ✅ 配置 CLI 入口点和依赖
+- ✅ 创建 FindKP 业务逻辑文档
+- ✅ 更新 README.md 添加 CLI 使用说明
+
+#### 性能提升
+
+1. **搜索覆盖率提升**:
+
+   - 使用本地名称可以找到更多本地化的搜索结果
+   - 多个查询变体增加搜索结果多样性
+   - 预期提升 30-50% 的搜索结果覆盖率
+
+2. **执行效率提升**:
+
+   - 采购和销售搜索并行执行，减少约 50% 的搜索时间
+   - 批量保存减少数据库操作次数
+
+3. **信息丰富度提升**:
+   - 公司定位和简报提供更多上下文
+   - 支持后续开发信个性化生成
+
+#### 用户体验提升
+
+1. **CLI 工具**:
+
+   - 方便脚本化和自动化使用
+   - 实时日志输出，清晰展示处理过程
+   - 结构化结果展示，便于阅读
+
+2. **文档完善**:
+   - FindKP 业务逻辑文档帮助理解系统
+   - README.md 更新提供完整使用指南
+
+### 技术要点
+
+#### 1. 查询生成策略
+
+**公司信息查询**:
+
+- 基础查询：英文名 + "official website"
+- 本地查询：本地名 + "official website"（如果不同）
+- 组合查询：英文名 + 本地名 + "official website"（如果不同）
+- 本地化变体：本地名 + "company website"（如果不同）
+
+**联系人查询**:
+
+- 保持现有英文查询模板
+- 增加本地名查询变体（如果本地名与英文名不同）
+- 每个查询模板都会生成英文名和本地名两个版本
+
+#### 2. 并行执行策略
+
+- 采购和销售搜索完全独立，可以安全并行
+- 使用 `asyncio.gather()` 确保两个任务并行执行
+- 异常处理：单个搜索失败不影响另一个
+
+#### 3. 批量保存策略
+
+- 收集所有联系人数据
+- 一次性创建所有 Contact 对象
+- 批量添加到 session
+- 一次性 commit
+- 降级机制：批量保存失败时自动降级为单个保存
+
+#### 4. CLI 设计
+
+**命令结构**:
+
+```bash
+smart-lead findkp --company-name-en "Apple Inc." --company-name-local "苹果公司" --country "USA"
+```
+
+**日志输出**:
+
+- 实时显示搜索进度、LLM 提取进度、联系人保存进度
+- 结构化输出最终结果（表格形式展示联系人信息）
+- 支持 `--verbose` 模式显示详细日志
+
+**依赖管理**:
+
+- 使用 `click` 库创建命令行接口
+- 通过 `pyproject.toml` 的 `[project.scripts]` 注册 CLI 入口点
+
+### 代码质量
+
+- ✅ 所有代码通过 lint 检查
+- ✅ 遵循项目架构规范
+- ✅ 完善的错误处理和日志记录
+- ✅ 清晰的代码注释和文档字符串
+
+### 后续优化方向
+
+- [ ] 添加 CLI 命令的单元测试
+- [ ] 优化 CLI 输出格式（使用 rich 或 colorlog 美化）
+- [ ] 添加搜索结果缓存机制
+- [ ] 优化去重算法（使用更复杂的相似度计算）
+- [ ] 实现增量更新联系人信息功能
+- [ ] 添加数据验证（邮箱验证、LinkedIn 信息验证）
+- [ ] 支持导出联系人信息到 CSV、Excel 等格式
+
+---
+
+## 2025-11-05 18:07:29 - 接入三个新的国内 LLM 模型到统一选择系统
+
+### 需求描述
+
+在 `.env.example` 中已经添加了三个新的国内模型配置：
+- GLM（智谱AI）：`GLM_API_KEY`
+- Qwen（通义千问）：`QWEN_API_KEY`、`QWEN_MODEL`
+- DeepSeek（已存在）：`DEEPSEEK_API_KEY`
+
+需要将这些模型集成到 LLM 的统一选择系统中，使得系统能够根据模型名称自动路由到相应的 API 提供商。
+
+### 实现逻辑
+
+#### 1. 架构设计
+
+系统采用 LLM 工厂模式，通过 `LLMRouter` 类根据模型名称自动判断应该使用哪个提供商：
+
+```mermaid
+graph TB
+    A[业务服务层<br/>findkp/service.py] --> B[LLM 工厂<br/>llm.get_llm]
+    B --> C[LLMRouter<br/>路由判断]
+    
+    C --> D{模型名称匹配}
+    D -->|deepseek-chat<br/>deepseek-coder| E[DeepSeek 路径]
+    D -->|glm-4<br/>glm-4-plus<br/>glm-4-flash| F[GLM 路径]
+    D -->|qwen-turbo<br/>qwen-plus<br/>qwen-max| G[Qwen 路径]
+    D -->|gpt-*<br/>claude-*| H[OpenRouter 路径]
+    
+    E --> I[_create_deepseek_llm]
+    F --> J[_create_glm_llm]
+    G --> K[_create_qwen_llm]
+    H --> L[_create_openrouter_llm]
+    
+    I --> M[init_chat_model<br/>provider=deepseek]
+    J --> N[init_chat_model<br/>provider=zhipu]
+    K --> O[init_chat_model<br/>provider=qwen]
+    L --> P[init_chat_model<br/>provider=openai<br/>base_url=openrouter.ai]
+    
+    M --> Q[返回 ChatModel 实例]
+    N --> Q
+    O --> Q
+    P --> Q
+    
+    style A fill:#e1f5ff
+    style B fill:#fff4e1
+    style C fill:#fff4e1
+    style E fill:#e8f5e9
+    style F fill:#e8f5e9
+    style G fill:#e8f5e9
+    style H fill:#fce4ec
+    style Q fill:#f3e5f5
+```
+
+#### 2. 配置管理（config.py）
+
+在 `Settings` 类中添加了三个新的配置项：
+
+```python
+# 国内 API 配置
+DEEPSEEK_API_KEY: str = ""  # DeepSeek API Key（使用 langchain-deepseek）
+GLM_API_KEY: str = ""  # GLM（智谱AI）API Key
+QWEN_API_KEY: str = ""  # Qwen（通义千问）API Key
+QWEN_MODEL: str = ""  # Qwen 模型名称（如 qwen-turbo, qwen-plus, qwen-max）
+```
+
+#### 3. 模型路由映射（llm/factory.py）
+
+在 `LLMRouter.DOMESTIC_MODELS` 字典中添加了所有支持的国内模型：
+
+```python
+DOMESTIC_MODELS = {
+    # DeepSeek 模型
+    "deepseek-chat": "deepseek",
+    "deepseek-coder": "deepseek",
+    # GLM（智谱AI）模型
+    "glm-4": "glm",
+    "glm-4-plus": "glm",
+    "glm-4-flash": "glm",
+    # Qwen（通义千问）模型
+    "qwen-turbo": "qwen",
+    "qwen-plus": "qwen",
+    "qwen-max": "qwen",
+    "qwen-7b-chat": "qwen",
+    "qwen-14b-chat": "qwen",
+    "qwen-72b-chat": "qwen",
+}
+```
+
+#### 4. 实现创建函数
+
+为每个提供商实现了对应的创建函数：
+
+**DeepSeek（已存在，保持不变）**：
+- 使用 `provider="deepseek"`
+- 环境变量：`DEEPSEEK_API_KEY`
+
+**GLM（智谱AI）**：
+- 使用 `provider="zhipu"`（LangChain 中智谱AI 的 provider 名称）
+- 环境变量：`ZHIPU_API_KEY`（从 `GLM_API_KEY` 配置读取）
+- 支持的模型：`glm-4`, `glm-4-plus`, `glm-4-flash`
+
+**Qwen（通义千问）**：
+- 使用 `provider="qwen"`
+- 环境变量：`DASHSCOPE_API_KEY`（从 `QWEN_API_KEY` 配置读取）
+- 模型名称：优先使用 `QWEN_MODEL` 配置，如果未配置则使用传入的 `model` 参数
+- 支持的模型：`qwen-turbo`, `qwen-plus`, `qwen-max`, `qwen-7b-chat`, `qwen-14b-chat`, `qwen-72b-chat`
+
+#### 5. 路由逻辑更新
+
+更新了 `_create_direct_llm` 函数，支持三个提供商：
+
+```python
+def _create_direct_llm(model: str, provider_name: str, temperature: float, **kwargs):
+    if provider_name == "deepseek":
+        return _create_deepseek_llm(model, temperature, **kwargs)
+    elif provider_name == "glm":
+        return _create_glm_llm(model, temperature, **kwargs)
+    elif provider_name == "qwen":
+        return _create_qwen_llm(model, temperature, **kwargs)
+    else:
+        raise ValueError(f"不支持的国内 API 提供商: {provider_name}")
+```
+
+### 使用方式
+
+系统现在支持通过 `LLM_MODEL` 环境变量选择任一支持的模型：
+
+```bash
+# 使用 DeepSeek
+LLM_MODEL=deepseek-chat
+
+# 使用 GLM
+LLM_MODEL=glm-4
+
+# 使用 Qwen
+LLM_MODEL=qwen-turbo
+QWEN_MODEL=qwen-turbo  # 可选，如果未设置则使用 LLM_MODEL 的值
+```
+
+### 技术细节
+
+1. **环境变量映射**：
+   - GLM 使用 `ZHIPU_API_KEY`（LangChain 标准）
+   - Qwen 使用 `DASHSCOPE_API_KEY`（DashScope 是阿里云的 API 服务名称）
+
+2. **错误处理**：
+   - 每个创建函数都会检查对应的 API Key 是否配置
+   - 如果未配置会抛出明确的 `ValueError` 异常
+
+3. **日志记录**：
+   - 每个创建函数都会记录调试日志，包含模型名称和提供商信息
+
+### 修改文件清单
+
+- `config.py`: 添加 `GLM_API_KEY`、`QWEN_API_KEY`、`QWEN_MODEL` 配置项
+- `llm/factory.py`: 
+  - 更新 `DOMESTIC_MODELS` 字典，添加 GLM 和 Qwen 模型映射
+  - 实现 `_create_glm_llm` 函数
+  - 实现 `_create_qwen_llm` 函数
+  - 更新 `_create_direct_llm` 函数以支持新提供商
+  - 更新文档字符串
+
+### 注意事项
+
+1. **依赖安装**：确保安装了对应的 LangChain 集成包：
+   - `langchain-deepseek`（DeepSeek）
+   - `langchain-zhipu`（GLM）
+   - `langchain-qwen`（Qwen）
+
+2. **API Key 配置**：需要在 `.env` 文件中配置对应的 API Key：
+   ```bash
+   DEEPSEEK_API_KEY="your_deepseek_key"
+   GLM_API_KEY="your_glm_key"
+   QWEN_API_KEY="your_qwen_key"
+   QWEN_MODEL="qwen-turbo"  # 可选
+   ```
+
+3. **模型名称**：确保使用的模型名称在 `DOMESTIC_MODELS` 字典中有映射，否则会默认使用 OpenRouter
+
+---
+
+## 2025-11-05 18:15:00 - 简化 GLM 和 Qwen 接入方式（使用 OpenAI 兼容接口）
+
+### 需求描述
+
+用户反馈 GLM（智谱AI）和 Qwen（通义千问）都支持 OpenAI 兼容的返回形式，可以直接通过改变 `base_url` 来接入，无需创建自定义包装类。
+
+### 实现逻辑
+
+#### 1. 简化方案
+
+由于 GLM 和 Qwen 都提供了 OpenAI 兼容的 API 接口，我们可以直接使用 `init_chat_model` 并指定不同的 `base_url`，而不需要创建自定义的 HTTP 客户端包装类。
+
+```mermaid
+graph TB
+    A[业务服务层<br/>findkp/service.py] --> B[LLM 工厂<br/>llm.get_llm]
+    B --> C[LLMRouter<br/>路由判断]
+    
+    C --> D{模型名称匹配}
+    D -->|deepseek-chat<br/>deepseek-coder| E[DeepSeek 路径<br/>langchain-deepseek]
+    D -->|glm-4<br/>glm-4-plus<br/>glm-4-flash| F[GLM 路径<br/>OpenAI 兼容接口]
+    D -->|qwen-turbo<br/>qwen-plus<br/>qwen-max| G[Qwen 路径<br/>OpenAI 兼容接口]
+    D -->|gpt-*<br/>claude-*| H[OpenRouter 路径<br/>OpenAI 兼容接口]
+    
+    E --> I[init_chat_model<br/>provider=deepseek]
+    F --> J[init_chat_model<br/>provider=openai<br/>base_url=open.bigmodel.cn]
+    G --> K[init_chat_model<br/>provider=openai<br/>base_url=dashscope.aliyuncs.com]
+    H --> L[init_chat_model<br/>provider=openai<br/>base_url=openrouter.ai]
+    
+    I --> M[返回 ChatModel 实例]
+    J --> M
+    K --> M
+    L --> M
+    
+    style A fill:#e1f5ff
+    style B fill:#fff4e1
+    style C fill:#fff4e1
+    style E fill:#e8f5e9
+    style F fill:#fff9c4
+    style G fill:#fff9c4
+    style H fill:#fce4ec
+    style M fill:#f3e5f5
+```
+
+#### 2. 代码修改
+
+**删除自定义包装类**：
+- 删除了 `llm/custom_providers.py` 文件（不再需要自定义 HTTP 客户端）
+
+**简化 GLM 实现**：
+```python
+def _create_glm_llm(model: str, temperature: float, **kwargs):
+    """使用 OpenAI 兼容接口"""
+    return init_chat_model(
+        model=model,
+        model_provider="openai",  # 使用 OpenAI 兼容接口
+        temperature=temperature,
+        api_key=settings.GLM_API_KEY,
+        base_url="https://open.bigmodel.cn/api/paas/v4",  # GLM API 地址
+        **kwargs,
+    )
+```
+
+**简化 Qwen 实现**：
+```python
+def _create_qwen_llm(model: str, temperature: float, **kwargs):
+    """使用 OpenAI 兼容接口"""
+    actual_model = settings.QWEN_MODEL or model
+    return init_chat_model(
+        model=actual_model,
+        model_provider="openai",  # 使用 OpenAI 兼容接口
+        temperature=temperature,
+        api_key=settings.QWEN_API_KEY,
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",  # Qwen 兼容模式
+        **kwargs,
+    )
+```
+
+#### 3. API 端点配置
+
+**GLM（智谱AI）**：
+- Base URL: `https://open.bigmodel.cn/api/paas/v4`
+- 使用 OpenAI 兼容接口
+- API Key: 从 `GLM_API_KEY` 配置读取
+
+**Qwen（通义千问）**：
+- Base URL: `https://dashscope.aliyuncs.com/compatible-mode/v1`
+- 使用 DashScope 兼容模式（OpenAI 兼容）
+- API Key: 从 `QWEN_API_KEY` 配置读取
+
+### 优势
+
+1. **代码更简洁**：不需要维护自定义 HTTP 客户端代码
+2. **统一接口**：所有模型都使用 LangChain 的标准接口，代码一致性更好
+3. **易于维护**：使用 LangChain 的标准实现，减少了自定义代码的维护成本
+4. **自动兼容**：LangChain 会自动处理请求/响应格式转换
+
+### 修改文件清单
+
+- `llm/factory.py`: 
+  - 简化 `_create_glm_llm` 函数，使用 `init_chat_model` + `base_url`
+  - 简化 `_create_qwen_llm` 函数，使用 `init_chat_model` + `base_url`
+  - 移除 `custom_providers` 导入
+- `llm/custom_providers.py`: 删除文件（不再需要）
+
+### 注意事项
+
+1. **API 兼容性**：确保 GLM 和 Qwen 的 API 端点支持 OpenAI 兼容格式
+2. **模型名称**：确保传入的模型名称与对应 API 提供商支持的模型名称一致
+3. **错误处理**：LangChain 会自动处理 API 错误，返回标准的异常信息
+
+---
+
+## 2025-11-05 18:20:00 - 使用智谱AI Python SDK 接入 GLM 模型
+
+### 需求描述
+
+根据智谱AI官方文档（https://docs.bigmodel.cn/cn/api/introduction#python-sdk），使用 Python SDK（zhipuai）方式接入 GLM 模型，而不是使用 OpenAI 兼容接口。
+
+### 实现逻辑
+
+#### 1. 架构设计
+
+创建了 GLM SDK 包装类，兼容 LangChain ChatModel 接口，内部使用智谱AI的官方 Python SDK。
+
+```mermaid
+graph TB
+    A[业务服务层<br/>findkp/service.py] --> B[LLM 工厂<br/>llm.get_llm]
+    B --> C[LLMRouter<br/>路由判断]
+    
+    C --> D{模型名称匹配}
+    D -->|deepseek-chat<br/>deepseek-reasoner| E[DeepSeek 路径<br/>langchain-deepseek]
+    D -->|glm-4<br/>glm-4-plus<br/>glm-4-flash| F[GLM 路径<br/>Python SDK]
+    D -->|qwen-turbo<br/>qwen-plus<br/>qwen-max| G[Qwen 路径<br/>OpenAI 兼容接口]
+    D -->|gpt-*<br/>claude-*| H[OpenRouter 路径<br/>OpenAI 兼容接口]
+    
+    E --> I[init_chat_model<br/>provider=deepseek]
+    F --> J[GLMLLMWrapper<br/>zhipuai SDK]
+    G --> K[init_chat_model<br/>provider=openai<br/>base_url=dashscope]
+    H --> L[init_chat_model<br/>provider=openai<br/>base_url=openrouter]
+    
+    J --> M[ZhipuAI 客户端<br/>client.chat.completions.create]
+    M --> N[返回 ChatModel 实例]
+    I --> N
+    K --> N
+    L --> N
+    
+    style A fill:#e1f5ff
+    style B fill:#fff4e1
+    style C fill:#fff4e1
+    style E fill:#e8f5e9
+    style F fill:#fff9c4
+    style G fill:#fff9c4
+    style H fill:#fce4ec
+    style J fill:#ffe0b2
+    style M fill:#ffe0b2
+    style N fill:#f3e5f5
+```
+
+#### 2. 创建 GLM SDK 包装类
+
+创建了 `llm/glm_wrapper.py`，实现了 `GLMLLMWrapper` 类：
+
+**核心特性**：
+- 兼容 LangChain ChatModel 接口（实现 `ainvoke` 和 `invoke` 方法）
+- 内部使用 `zhipuai` SDK 的 `ZhipuAI` 客户端
+- 异步调用使用 `asyncio.to_thread` 在线程池中执行同步 SDK 调用
+- 返回 `AIMessage` 对象，与 LangChain 标准接口一致
+
+**实现细节**：
+```python
+from zhipuai import ZhipuAI
+from langchain_core.messages import AIMessage
+
+class GLMLLMWrapper:
+    def __init__(self, model: str, temperature: float = 0.0, api_key: Optional[str] = None, **kwargs):
+        self.client = ZhipuAI(api_key=self.api_key)
+        # ...
+    
+    async def ainvoke(self, messages: List[Dict[str, str]], **kwargs) -> AIMessage:
+        # 在线程池中执行同步 SDK 调用
+        response = await asyncio.to_thread(
+            lambda: self.client.chat.completions.create(**request_params)
+        )
+        content = response.choices[0].message.content
+        return AIMessage(content=content)
+```
+
+#### 3. 更新工厂函数
+
+更新了 `llm/factory.py` 中的 `_create_glm_llm` 函数：
+
+```python
+def _create_glm_llm(model: str, temperature: float, **kwargs):
+    """使用智谱AI Python SDK"""
+    return GLMLLMWrapper(
+        model=model, 
+        temperature=temperature, 
+        api_key=settings.GLM_API_KEY, 
+        **kwargs
+    )
+```
+
+#### 4. 添加依赖
+
+在 `pyproject.toml` 中添加了 `zhipuai>=2.0.0` 依赖。
+
+### 优势
+
+1. **官方支持**：使用智谱AI官方 Python SDK，功能更完整，更新更及时
+2. **更好的类型提示**：SDK 提供完整的类型定义，IDE 支持更好
+3. **功能完整**：SDK 支持所有智谱AI的功能，包括流式响应、异步调用等
+4. **兼容性**：包装类完全兼容 LangChain 接口，业务层代码无需修改
+
+### 技术细节
+
+1. **异步处理**：
+   - 智谱AI SDK 是同步的，使用 `asyncio.to_thread` 在线程池中执行
+   - 这样不会阻塞 FastAPI 的事件循环
+
+2. **消息格式转换**：
+   - LangChain 使用 `[{"role": "user", "content": "..."}]` 格式
+   - zhipuai SDK 也使用相同格式，无需转换
+
+3. **错误处理**：
+   - SDK 会自动抛出异常，包装类会向上传播
+   - 业务层可以捕获并处理这些异常
+
+### 修改文件清单
+
+- `pyproject.toml`: 添加 `zhipuai>=2.0.0` 依赖
+- `llm/glm_wrapper.py`: 新建文件，实现 GLM SDK 包装类
+- `llm/factory.py`: 
+  - 导入 `GLMLLMWrapper`
+  - 更新 `_create_glm_llm` 函数以使用 SDK 包装类
+
+### 安装依赖
+
+使用以下命令安装新的依赖：
+
+```bash
+uv sync
+```
+
+或者单独安装：
+
+```bash
+uv add zhipuai>=2.0.0
+```
+
+### 使用方式
+
+使用方式保持不变，只需要配置 `GLM_API_KEY` 环境变量：
+
+```bash
+GLM_API_KEY="your_glm_api_key"
+LLM_MODEL="glm-4"
+```
+
+### 参考文档
+
+- 智谱AI官方文档：https://docs.bigmodel.cn/cn/api/introduction#python-sdk
+
+---

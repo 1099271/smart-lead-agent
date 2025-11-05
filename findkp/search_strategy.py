@@ -92,46 +92,104 @@ class SearchStrategy:
         return {"gl": gl, "hl": hl, "location": location}
 
     def generate_company_queries(
-        self, company_name: str, country: Optional[str]
+        self,
+        company_name_en: str,
+        company_name_local: Optional[str],
+        country: Optional[str],
     ) -> List[Dict[str, Any]]:
         """
         生成公司信息搜索查询列表
 
         Args:
-            company_name: 公司名称
+            company_name_en: 公司英文名称
+            company_name_local: 公司本地名称（可选）
             country: 国家名称（可选）
 
         Returns:
             查询参数字典列表，用于批量搜索
         """
         queries = []
-
-        # 基础查询：公司官网
-        base_query = f"{company_name} official website"
-        if country:
-            base_query += f" {country}"
-
-        query_params = {"q": base_query}
         country_params = self.get_country_params(country)
-        if country_params["gl"]:
-            query_params["gl"] = country_params["gl"]
-        if country_params["hl"]:
-            query_params["hl"] = country_params["hl"]
-        if country_params["location"]:
-            query_params["location"] = country_params["location"]
+        seen_queries = set()  # 用于去重
 
-        queries.append(query_params)
+        # 查询1: 英文名 + official website
+        query1 = f"{company_name_en} official website"
+        if country:
+            query1 += f" {country}"
+        if query1 not in seen_queries:
+            seen_queries.add(query1)
+            query_params = {"q": query1}
+            if country_params["gl"]:
+                query_params["gl"] = country_params["gl"]
+            if country_params["hl"]:
+                query_params["hl"] = country_params["hl"]
+            if country_params["location"]:
+                query_params["location"] = country_params["location"]
+            queries.append(query_params)
 
+        # 如果本地名存在且与英文名不同，生成更多查询变体
+        if company_name_local and company_name_local.strip() != company_name_en.strip():
+            # 查询2: 本地名 + official website
+            query2 = f"{company_name_local} official website"
+            if country:
+                query2 += f" {country}"
+            if query2 not in seen_queries:
+                seen_queries.add(query2)
+                query_params = {"q": query2}
+                if country_params["gl"]:
+                    query_params["gl"] = country_params["gl"]
+                if country_params["hl"]:
+                    query_params["hl"] = country_params["hl"]
+                if country_params["location"]:
+                    query_params["location"] = country_params["location"]
+                queries.append(query_params)
+
+            # 查询3: 英文名 + 本地名 + official website
+            query3 = f"{company_name_en} {company_name_local} official website"
+            if country:
+                query3 += f" {country}"
+            if query3 not in seen_queries:
+                seen_queries.add(query3)
+                query_params = {"q": query3}
+                if country_params["gl"]:
+                    query_params["gl"] = country_params["gl"]
+                if country_params["hl"]:
+                    query_params["hl"] = country_params["hl"]
+                if country_params["location"]:
+                    query_params["location"] = country_params["location"]
+                queries.append(query_params)
+
+            # 查询4: 本地名 + company website（本地化变体）
+            query4 = f"{company_name_local} company website"
+            if country:
+                query4 += f" {country}"
+            if query4 not in seen_queries:
+                seen_queries.add(query4)
+                query_params = {"q": query4}
+                if country_params["gl"]:
+                    query_params["gl"] = country_params["gl"]
+                if country_params["hl"]:
+                    query_params["hl"] = country_params["hl"]
+                if country_params["location"]:
+                    query_params["location"] = country_params["location"]
+                queries.append(query_params)
+
+        logger.info(f"生成了 {len(queries)} 个公司信息查询")
         return queries
 
     def generate_contact_queries(
-        self, company_name: str, country: Optional[str], department: str
+        self,
+        company_name_en: str,
+        company_name_local: Optional[str],
+        country: Optional[str],
+        department: str,
     ) -> List[Dict[str, Any]]:
         """
         生成联系人搜索查询列表
 
         Args:
-            company_name: 公司名称
+            company_name_en: 公司英文名称
+            company_name_local: 公司本地名称（可选）
             country: 国家名称（可选）
             department: 部门名称（"采购" 或 "销售"）
 
@@ -140,27 +198,28 @@ class SearchStrategy:
         """
         queries = []
         country_params = self.get_country_params(country)
+        seen_queries = set()  # 用于去重
 
-        # 根据部门生成不同的搜索查询
+        # 根据部门生成不同的搜索查询模板
         if department == "采购":
             query_templates = [
-                f"{company_name} procurement manager",
-                f"{company_name} purchasing manager",
-                f"{company_name} purchasing contact",
-                f"{company_name} procurement director",
+                f"{company_name_en} procurement manager",
+                f"{company_name_en} purchasing manager",
+                f"{company_name_en} purchasing contact",
+                f"{company_name_en} procurement director",
             ]
         elif department == "销售":
             query_templates = [
-                f"{company_name} sales manager",
-                f"{company_name} sales director",
-                f"{company_name} sales contact",
-                f"{company_name} business development manager",
+                f"{company_name_en} sales manager",
+                f"{company_name_en} sales director",
+                f"{company_name_en} sales contact",
+                f"{company_name_en} business development manager",
             ]
         else:
             # 默认使用通用查询
             query_templates = [
-                f"{company_name} {department} manager",
-                f"{company_name} {department} contact",
+                f"{company_name_en} {department} manager",
+                f"{company_name_en} {department} contact",
             ]
 
         # 为每个查询模板添加国家信息和联系关键词
@@ -170,15 +229,56 @@ class SearchStrategy:
                 query += f" {country}"
             query += " contact email"
 
-            query_params = {"q": query}
-            if country_params["gl"]:
-                query_params["gl"] = country_params["gl"]
-            if country_params["hl"]:
-                query_params["hl"] = country_params["hl"]
-            if country_params["location"]:
-                query_params["location"] = country_params["location"]
+            if query not in seen_queries:
+                seen_queries.add(query)
+                query_params = {"q": query}
+                if country_params["gl"]:
+                    query_params["gl"] = country_params["gl"]
+                if country_params["hl"]:
+                    query_params["hl"] = country_params["hl"]
+                if country_params["location"]:
+                    query_params["location"] = country_params["location"]
+                queries.append(query_params)
 
-            queries.append(query_params)
+        # 如果本地名存在且与英文名不同，额外生成本地名查询变体
+        if company_name_local and company_name_local.strip() != company_name_en.strip():
+            # 使用本地名生成类似的查询模板
+            if department == "采购":
+                local_query_templates = [
+                    f"{company_name_local} procurement manager",
+                    f"{company_name_local} purchasing manager",
+                    f"{company_name_local} purchasing contact",
+                ]
+            elif department == "销售":
+                local_query_templates = [
+                    f"{company_name_local} sales manager",
+                    f"{company_name_local} sales director",
+                    f"{company_name_local} sales contact",
+                ]
+            else:
+                local_query_templates = [
+                    f"{company_name_local} {department} manager",
+                    f"{company_name_local} {department} contact",
+                ]
 
+            # 为每个本地查询模板添加国家信息和联系关键词
+            for template in local_query_templates:
+                query = template
+                if country:
+                    query += f" {country}"
+                query += " contact email"
+
+                if query not in seen_queries:
+                    seen_queries.add(query)
+                    query_params = {"q": query}
+                    if country_params["gl"]:
+                        query_params["gl"] = country_params["gl"]
+                    if country_params["hl"]:
+                        query_params["hl"] = country_params["hl"]
+                    if country_params["location"]:
+                        query_params["location"] = country_params["location"]
+                    queries.append(query_params)
+
+        logger.info(f"生成了 {len(queries)} 个{department}部门联系人查询")
         return queries
 

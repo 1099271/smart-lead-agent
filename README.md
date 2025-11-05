@@ -88,21 +88,105 @@ uvicorn main:app --reload
 
 服务将在 `http://localhost:8000` 启动。
 
-## API 使用
+## CLI 使用
 
-### 生成潜在客户
+项目提供了命令行工具，方便在终端环境中直接使用 FindKP 功能。
 
-向 `/generate-lead` 端点发送 POST 请求：
+### 安装 CLI
+
+安装项目依赖后，CLI 工具会自动注册为系统命令：
 
 ```bash
-curl -X POST "http://localhost:8000/generate-lead" \
+# 安装依赖（CLI 会自动注册）
+uv sync
+
+# 验证 CLI 是否可用
+smart-lead --help
+```
+
+### FindKP 命令
+
+使用 `smart-lead findkp` 命令查找公司的关键联系人：
+
+```bash
+# 基本用法
+smart-lead findkp \
+  --company-name-en "Apple Inc." \
+  --company-name-local "苹果公司" \
+  --country "USA"
+
+# 带详细日志输出
+smart-lead findkp \
+  --company-name-en "Apple Inc." \
+  --company-name-local "苹果公司" \
+  --country "USA" \
+  --verbose
+```
+
+**参数说明**:
+- `--company-name-en`: 公司英文名称（必需）
+- `--company-name-local`: 公司本地名称（必需）
+- `--country`: 国家名称（可选）
+- `--verbose` / `-v`: 显示详细日志输出
+
+**示例输出**:
+```
+============================================================
+FindKP - 查找公司关键联系人
+============================================================
+公司英文名: Apple Inc.
+公司本地名: 苹果公司
+国家: USA
+
+[INFO] 开始搜索公司信息: 苹果公司 (USA)
+[INFO] 生成了 4 个公司信息查询
+[INFO] 并行搜索中... (Serper + Google)
+[INFO] 聚合结果: 找到 15 条搜索结果
+[INFO] LLM 提取公司信息中...
+[INFO] ✓ 找到公司域名: apple.com
+[INFO] ✓ 找到公司行业: Technology
+[INFO] 并行搜索采购和销售部门 KP...
+[INFO] ✓ 找到 5 个采购部门联系人
+[INFO] ✓ 找到 3 个销售部门联系人
+[INFO] 批量保存 8 个联系人...
+[INFO] ✓ 完成！
+
+============================================================
+✓ 完成！
+============================================================
+公司 ID: 123
+公司域名: apple.com
+找到联系人数量: 8
+
+联系人列表:
+------------------------------------------------------------
+1. John Doe
+   邮箱: john.doe@apple.com
+   职位: Procurement Manager
+   部门: 采购
+   置信度: 0.85
+   LinkedIn: https://linkedin.com/in/johndoe
+...
+```
+
+### CLI 与 API 的区别
+
+- **CLI**: 适合脚本化、自动化场景，可以在终端直接查看实时日志
+- **API**: 适合集成到其他系统，返回结构化 JSON 数据
+
+## API 使用
+
+### FindKP API
+
+查找公司的关键联系人：
+
+```bash
+curl -X POST "http://localhost:8000/findkp/search" \
   -H "Content-Type: application/json" \
   -d '{
-    "company_name": "示例公司",
-    "search_queries": [
-      "{company_name} 采购经理",
-      "{company_name} procurement manager"
-    ]
+    "company_name_en": "Apple Inc.",
+    "company_name_local": "苹果公司",
+    "country": "USA"
   }'
 ```
 
@@ -140,8 +224,14 @@ smart-lead-agent/
 │   └── sql/
 │       └── 001_initial_schema.sql  # 数据库初始化脚本
 │
+├── cli/                    # CLI 命令行工具
+│   ├── __init__.py
+│   ├── main.py            # CLI 主入口
+│   └── findkp.py          # FindKP CLI 命令
+│
 └── docs/                   # 文档
-    └── architecture_design.md  # 架构设计文档
+    ├── architecture_design.md  # 架构设计文档
+    └── FINDKP_BUSINESS_LOGIC.md  # FindKP 业务逻辑文档
 ```
 
 ## 工作流程
@@ -159,7 +249,9 @@ graph TD
 
 ## 详细文档
 
-完整的架构设计和系统说明请参阅 [架构设计文档](docs/architecture_design.md)。
+- [架构设计文档](docs/architecture_design.md) - 系统整体架构设计
+- [FindKP 业务逻辑文档](docs/FINDKP_BUSINESS_LOGIC.md) - FindKP 模块详细业务逻辑和数据流向
+- [项目结构文档](docs/PROJECT_STRUCTURE.md) - 项目目录结构和组织规范
 
 ## 许可证
 

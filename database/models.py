@@ -31,6 +31,8 @@ class Company(Base):
     name = Column(String(255), unique=True, nullable=False, index=True)
     domain = Column(String(255))  # 公司域名
     industry = Column(String(100))  # 行业
+    positioning = Column(Text)  # 公司定位描述
+    brief = Column(Text)  # 公司简要介绍/简报
     status = Column(Enum(CompanyStatus), default=CompanyStatus.pending)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(

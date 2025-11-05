@@ -1,0 +1,19 @@
+"""CLI 主入口"""
+
+import click
+from cli.findkp import findkp
+
+# 创建主 CLI 组
+@click.group()
+@click.version_option(version="2.0.0")
+def cli():
+    """Smart Lead Agent - 自动化潜在客户开发系统"""
+    pass
+
+
+# 注册子命令
+cli.add_command(findkp)
+
+if __name__ == "__main__":
+    cli()
+

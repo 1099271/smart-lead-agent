@@ -35,10 +35,12 @@ async def find_kp(request: CompanyQuery, db: AsyncSession = Depends(get_db)):
     """
     try:
         logger.info(
-            f"收到 FindKP 请求: {request.company_name}"
+            f"收到 FindKP 请求: {request.company_name_en}|{request.company_name_local}"
             + (f" ({request.country})" if request.country else "")
         )
-        result = await service.find_kps(request.company_name, request.country, db)
+        result = await service.find_kps(
+            request.company_name_en, request.company_name_local, request.country, db
+        )
         return FindKPResponse(
             success=True,
             company_id=result["company_id"],

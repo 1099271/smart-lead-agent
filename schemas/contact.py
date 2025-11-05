@@ -8,7 +8,8 @@ from .base import BaseResponse
 class CompanyQuery(BaseModel):
     """FindKP API 输入"""
 
-    company_name: str
+    company_name_en: str
+    company_name_local: str
     country: Optional[str] = None
 
 

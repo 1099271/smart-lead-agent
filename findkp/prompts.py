@@ -1,7 +1,7 @@
 """FindKP 模块的 LLM Prompt 模板"""
 
 EXTRACT_COMPANY_INFO_PROMPT = """
-从以下搜索结果中提取公司的官方域名和行业信息。
+从以下搜索结果中提取公司的官方域名、行业信息、公司定位和简要介绍。
 
 {country_context}
 
@@ -11,10 +11,17 @@ EXTRACT_COMPANY_INFO_PROMPT = """
 请以 JSON 格式返回:
 {{
     "domain": "公司域名",
-    "industry": "行业"
+    "industry": "行业",
+    "positioning": "公司定位描述（市场定位、竞争优势、目标客户等，200字以内）",
+    "brief": "公司简要介绍（主要业务、产品、服务、规模等，300字以内）"
 }}
 
-如果找不到相关信息,请返回空字符串。
+要求:
+1. 如果找不到相关信息,请返回空字符串
+2. positioning 和 brief 应该基于搜索结果中的实际信息，不要编造
+3. positioning 重点描述公司在市场中的定位和竞争优势
+4. brief 重点描述公司的主要业务、产品和服务
+5. 使用简洁清晰的语言，避免冗余
 """
 
 EXTRACT_CONTACTS_PROMPT = """

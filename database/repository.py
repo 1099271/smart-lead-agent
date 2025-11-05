@@ -53,6 +53,48 @@ class Repository:
         await self.db.refresh(contact)
         return contact
 
+    async def create_contacts_batch(
+        self, contacts_info: List[KPInfo], company_id: int
+    ) -> List[models.Contact]:
+        """
+        批量创建联系人记录 - FindKP 板块（异步版本）
+
+        Args:
+            contacts_info: 联系人信息列表
+            company_id: 公司ID
+
+        Returns:
+            创建的联系人列表
+        """
+        contacts = []
+        for contact_info in contacts_info:
+            contact = models.Contact(
+                company_id=company_id,
+                full_name=contact_info.full_name,
+                email=contact_info.email,
+                role=contact_info.role,
+                department=contact_info.department,
+                linkedin_url=(
+                    str(contact_info.linkedin_url) if contact_info.linkedin_url else None
+                ),
+                twitter_url=(
+                    str(contact_info.twitter_url) if contact_info.twitter_url else None
+                ),
+                source=contact_info.source,
+                confidence_score=contact_info.confidence_score,
+            )
+            self.db.add(contact)
+            contacts.append(contact)
+
+        # 批量提交
+        await self.db.commit()
+
+        # 刷新所有对象
+        for contact in contacts:
+            await self.db.refresh(contact)
+
+        return contacts
+
     async def get_contacts_by_company(self, company_id: int) -> List[models.Contact]:
         """
         获取指定公司的所有联系人（异步版本）

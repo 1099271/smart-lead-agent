@@ -7,6 +7,7 @@ import logging
 from typing import Optional, Dict, Any, Tuple
 from langchain.chat_models import init_chat_model
 from config import settings
+from .glm_wrapper import GLMLLMWrapper
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +27,20 @@ class LLMRouter:
 
     # 国内模型列表（直接调用）
     DOMESTIC_MODELS = {
+        # DeepSeek 模型
         "deepseek-chat": "deepseek",
-        "deepseek-coder": "deepseek",
-        # 预留：Qwen 模型
-        # "qwen-turbo": "qwen",
-        # "qwen-plus": "qwen",
-        # "qwen-max": "qwen",
-        # 预留：Doubao 模型
-        # "doubao-pro": "doubao",
-        # "doubao-lite": "doubao",
+        "deepseek-reasoner": "deepseek",
+        # GLM（智谱AI）模型
+        "glm-4": "glm",
+        "glm-4-plus": "glm",
+        "glm-4-flash": "glm",
+        # Qwen（通义千问）模型
+        "qwen-turbo": "qwen",
+        "qwen-plus": "qwen",
+        "qwen-max": "qwen",
+        "qwen-7b-chat": "qwen",
+        "qwen-14b-chat": "qwen",
+        "qwen-72b-chat": "qwen",
     }
 
     @classmethod
@@ -70,7 +76,7 @@ def get_llm(model: Optional[str] = None, temperature: Optional[float] = None, **
 
     根据模型名称自动路由到相应的 API 提供商：
     - 国外模型（gpt-*, claude-* 等）→ OpenRouter
-    - 国内模型（deepseek-* 等）→ 直接调用
+    - 国内模型（deepseek-*, glm-*, qwen-* 等）→ 直接调用
 
     Args:
         model: 模型名称，默认使用 settings.LLM_MODEL
@@ -160,7 +166,7 @@ def _create_direct_llm(model: str, provider_name: str, temperature: float, **kwa
 
     Args:
         model: 模型名称
-        provider_name: 提供商名称（"deepseek", "qwen", "doubao"）
+        provider_name: 提供商名称（"deepseek", "glm", "qwen"）
         temperature: 温度参数
         **kwargs: 其他参数
 
@@ -169,12 +175,10 @@ def _create_direct_llm(model: str, provider_name: str, temperature: float, **kwa
     """
     if provider_name == "deepseek":
         return _create_deepseek_llm(model, temperature, **kwargs)
+    elif provider_name == "glm":
+        return _create_glm_llm(model, temperature, **kwargs)
     elif provider_name == "qwen":
-        # 预留：Qwen 实现
-        raise NotImplementedError("Qwen 支持尚未实现，请稍后添加")
-    elif provider_name == "doubao":
-        # 预留：Doubao 实现
-        raise NotImplementedError("Doubao 支持尚未实现，请稍后添加")
+        return _create_qwen_llm(model, temperature, **kwargs)
     else:
         raise ValueError(f"不支持的国内 API 提供商: {provider_name}")
 
@@ -206,4 +210,66 @@ def _create_deepseek_llm(model: str, temperature: float, **kwargs):
     # 使用 langchain-deepseek
     return init_chat_model(
         model=model, model_provider="deepseek", temperature=temperature, **kwargs
+    )
+
+
+def _create_glm_llm(model: str, temperature: float, **kwargs):
+    """
+    创建 GLM（智谱AI）LLM 实例（使用 Python SDK）
+
+    Args:
+        model: 模型名称（如 "glm-4", "glm-4-plus"）
+        temperature: 温度参数
+        **kwargs: 其他参数
+
+    Returns:
+        GLMLLMWrapper: GLM SDK 包装类实例（兼容 LangChain 接口）
+
+    Raises:
+        ValueError: 当 GLM_API_KEY 未配置时
+    """
+    if not settings.GLM_API_KEY:
+        raise ValueError("GLM API Key 未配置。请设置 GLM_API_KEY")
+
+    logger.debug(f"GLM 配置: model={model}, 使用 Python SDK (zhipuai)")
+
+    # 使用智谱AI Python SDK
+    return GLMLLMWrapper(
+        model=model, temperature=temperature, api_key=settings.GLM_API_KEY, **kwargs
+    )
+
+
+def _create_qwen_llm(model: str, temperature: float, **kwargs):
+    """
+    创建 Qwen（通义千问）LLM 实例（使用 OpenAI 兼容接口）
+
+    Args:
+        model: 模型名称（如 "qwen-turbo", "qwen-plus", "qwen-max"）
+        temperature: 温度参数
+        **kwargs: 其他参数
+
+    Returns:
+        ChatModel: LangChain ChatModel 实例
+
+    Raises:
+        ValueError: 当 QWEN_API_KEY 未配置时
+    """
+    if not settings.QWEN_API_KEY:
+        raise ValueError("Qwen API Key 未配置。请设置 QWEN_API_KEY")
+
+    # 如果配置了 QWEN_MODEL，使用配置的模型名称，否则使用传入的 model
+    actual_model = settings.QWEN_MODEL or model
+
+    logger.debug(
+        f"Qwen 配置: model={actual_model}, base_url=https://dashscope.aliyuncs.com/compatible-mode/v1"
+    )
+
+    # 使用 OpenAI 兼容接口，只需设置不同的 base_url
+    return init_chat_model(
+        model=actual_model,
+        model_provider="openai",  # 使用 OpenAI 兼容接口
+        temperature=temperature,
+        api_key=settings.QWEN_API_KEY,
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",  # Qwen 兼容模式 API 地址
+        **kwargs,
     )
