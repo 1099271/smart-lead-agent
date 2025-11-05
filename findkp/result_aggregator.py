@@ -78,7 +78,7 @@ class ResultAggregator:
 
             # 标题相似度去重（简单判断：如果标题被另一个标题包含，认为是重复）
             is_duplicate_title = False
-            for seen_title in seen_titles:
+            for seen_title in list(seen_titles):
                 if title_lower in seen_title or seen_title in title_lower:
                     # 找到对应的已存在结果
                     existing_result = next(
