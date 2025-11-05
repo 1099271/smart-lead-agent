@@ -121,6 +121,8 @@ class GoogleSearchProvider(BaseSearchProvider):
             格式：{"query1": [SearchResult, ...], "query2": [SearchResult, ...]}
             其中 key 是查询字符串（q 参数的值）
         """
+
+        return {}
         if not queries:
             return {}
 

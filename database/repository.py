@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from . import models
 from schemas.contact import KPInfo
@@ -75,7 +75,9 @@ class Repository:
                 role=contact_info.role,
                 department=contact_info.department,
                 linkedin_url=(
-                    str(contact_info.linkedin_url) if contact_info.linkedin_url else None
+                    str(contact_info.linkedin_url)
+                    if contact_info.linkedin_url
+                    else None
                 ),
                 twitter_url=(
                     str(contact_info.twitter_url) if contact_info.twitter_url else None
@@ -112,3 +114,70 @@ class Repository:
             select(models.Contact).filter(models.Contact.email == email)
         )
         return result.scalar_one_or_none()
+
+    async def create_serper_response(
+        self, trace_id: str, response_data: Dict[str, Any]
+    ) -> models.SerperResponse:
+        """
+        创建 Serper API 响应记录（异步版本）
+
+        Args:
+            trace_id: UUID traceid
+            response_data: API 响应数据，包含 searchParameters 和 credits
+
+        Returns:
+            创建的 SerperResponse 实例
+        """
+        # 提取 searchParameters 中的参数
+        search_params = response_data.get("searchParameters", {})
+
+        response = models.SerperResponse(
+            trace_id=trace_id,
+            q=search_params.get("q"),
+            type=search_params.get("type"),
+            gl=search_params.get("gl"),
+            hl=search_params.get("hl"),
+            location=search_params.get("location"),
+            tbs=search_params.get("tbs"),
+            engine=search_params.get("engine"),
+            credits=response_data.get("credits"),
+        )
+        self.db.add(response)
+        await self.db.commit()
+        await self.db.refresh(response)
+        return response
+
+    async def create_serper_organic_results(
+        self, trace_id: str, organic_results: List[Dict[str, Any]]
+    ) -> List[models.SerperOrganicResult]:
+        """
+        批量创建 Serper API 搜索结果记录（异步版本）
+
+        Args:
+            trace_id: UUID traceid
+            organic_results: organic 数组中的结果列表
+
+        Returns:
+            创建的 SerperOrganicResult 列表
+        """
+        results = []
+        for item in organic_results:
+            result = models.SerperOrganicResult(
+                trace_id=trace_id,
+                position=item.get("position"),
+                title=item.get("title", ""),
+                link=item.get("link", ""),
+                snippet=item.get("snippet", ""),
+                date=item.get("date"),
+            )
+            self.db.add(result)
+            results.append(result)
+
+        # 批量提交
+        await self.db.commit()
+
+        # 刷新所有对象
+        for result in results:
+            await self.db.refresh(result)
+
+        return results

@@ -2428,3 +2428,234 @@ LLM_MODEL="glm-4"
 - 智谱AI官方文档：https://docs.bigmodel.cn/cn/api/introduction#python-sdk
 
 ---
+
+## 2025-11-05 20:05:28 - 增强 LLM JSON 解析的容错处理机制
+
+### 需求描述
+
+根据终端日志显示的错误，LLM 返回的 JSON 内容存在解析失败的问题，需要建立完善的容错机制来处理各种异常情况。
+
+**遇到的问题**：
+1. LLM 返回的 JSON 可能被 markdown 代码块包裹（如 ````json ... ````）
+2. JSON 格式可能不规范（单引号、尾随逗号等）
+3. LLM 可能返回数组格式而不是对象格式（联系人列表）
+4. JSON 解析失败时没有充分的错误处理和日志记录
+5. `procurement_result` 可能为 `None`，导致 `AttributeError`
+
+### 实现逻辑
+
+#### 1. 问题分析
+
+通过分析日志和代码，发现了以下问题：
+
+```
+ERROR:findkp.service:LLM 返回的 JSON 解析失败: Expecting value: line 1 column 1 (char 0)
+ERROR:findkp.service:FindKP 流程失败: 'NoneType' object has no attribute 'get'
+```
+
+**根本原因**：
+- LLM 返回的内容可能不是纯 JSON，可能包含 markdown 代码块、说明文字等
+- JSON 解析失败时返回空字典 `{}`，但后续代码期望特定格式
+- `asyncio.gather` 的异常处理不完整，没有检查 `None` 值
+
+#### 2. 实现方案
+
+**2.1 添加 JSON 提取方法 (`_extract_json_from_text`)**
+
+实现了多策略的 JSON 提取机制：
+
+```python
+def _extract_json_from_text(self, text: str) -> Optional[str]:
+    """
+    从文本中提取 JSON 内容，使用三种策略：
+    1. 提取 markdown 代码块中的内容
+    2. 使用括号匹配查找完整的 JSON 对象/数组
+    3. 尝试直接解析整个文本
+    """
+```
+
+**策略说明**：
+- **策略1**：优先提取 markdown 代码块（```json ... ``` 或 ``` ... ```）
+- **策略2**：使用括号深度匹配找到完整的 JSON 结构（处理嵌套对象/数组）
+- **策略3**：如果都没找到，尝试直接解析整个文本（可能是纯 JSON）
+
+**2.2 添加 JSON 修复方法 (`_fix_common_json_issues`)**
+
+修复常见的 JSON 格式问题：
+
+```python
+def _fix_common_json_issues(self, json_str: str) -> str:
+    """
+    修复常见的 JSON 格式问题：
+    - 移除 BOM 标记
+    - 修复单引号为双引号
+    - 移除尾随逗号
+    - 移除注释（JSON 不支持注释）
+    """
+```
+
+**2.3 添加容错解析方法 (`_parse_json_with_fallback`)**
+
+实现多层容错机制：
+
+```python
+def _parse_json_with_fallback(
+    self, content: str, expected_type: type = dict
+) -> Optional[Union[Dict, List]]:
+    """
+    解析 JSON，支持多种容错机制：
+    1. 提取 JSON 内容
+    2. 修复常见问题
+    3. 多次尝试解析
+    4. 类型验证和转换
+    """
+```
+
+**容错流程**：
+1. 从文本中提取 JSON
+2. 修复常见格式问题
+3. 尝试多种解析方式（原始字符串、移除换行等）
+4. 验证并转换类型（处理数组/对象格式不匹配）
+
+**2.4 改进 `extract_with_llm` 方法**
+
+增强错误处理和日志记录：
+
+```python
+async def extract_with_llm(self, prompt: str) -> Dict:
+    """
+    支持多种容错机制：
+    1. 提取被 markdown 代码块包裹的 JSON
+    2. 修复常见的 JSON 格式问题
+    3. 处理数组和对象两种格式
+    4. 详细的错误日志
+    """
+```
+
+**改进点**：
+- 检查响应对象和内容是否存在
+- 使用容错解析方法
+- 处理数组格式（自动包装为字典）
+- 详细的错误日志（记录前1000个字符）
+
+**2.5 改进 `_search_contacts_parallel` 方法**
+
+增强对联系人数据的处理：
+
+```python
+# 处理 LLM 返回的联系人数据
+# 可能的情况：
+# 1. 返回字典 {"contacts": [...]}
+# 2. 返回列表 [...]（直接返回数组）
+# 3. 返回空字典 {}
+```
+
+**处理逻辑**：
+- 支持字典格式：提取 `contacts` 字段或查找第一个列表字段
+- 支持列表格式：直接使用
+- 验证和过滤：确保每个联系人都是字典格式
+- 异常处理：确保总是返回有效的字典
+
+**2.6 改进 `find_kps` 方法的异常处理**
+
+增强对 `asyncio.gather` 结果的检查：
+
+```python
+# 处理异常情况和 None 值
+if isinstance(procurement_result, Exception):
+    procurement_result = {"contacts": [], "results": []}
+elif procurement_result is None:
+    procurement_result = {"contacts": [], "results": []}
+elif not isinstance(procurement_result, dict):
+    procurement_result = {"contacts": [], "results": []}
+```
+
+**改进点**：
+- 检查 `Exception` 类型
+- 检查 `None` 值
+- 检查类型是否正确
+- 所有情况下都返回有效字典
+
+#### 3. 容错机制流程图
+
+```
+LLM 响应
+    ↓
+检查响应对象和内容
+    ↓
+提取 JSON 内容
+    ├─→ 策略1: 提取 markdown 代码块
+    ├─→ 策略2: 括号匹配查找 JSON
+    └─→ 策略3: 直接解析文本
+    ↓
+修复常见格式问题
+    ├─→ 移除 BOM
+    ├─→ 修复引号
+    ├─→ 移除尾随逗号
+    └─→ 移除注释
+    ↓
+多次尝试解析
+    ├─→ 尝试1: 原始字符串
+    └─→ 尝试2: 移除换行
+    ↓
+类型验证和转换
+    ├─→ 符合预期类型 → 返回
+    ├─→ 数组但期望字典 → 包装为字典
+    └─→ 字典但期望数组 → 提取数组字段
+    ↓
+返回结果或 None
+```
+
+#### 4. 关键改进点总结
+
+1. **JSON 提取**：支持从 markdown 代码块、混合文本中提取 JSON
+2. **格式修复**：自动修复常见的 JSON 格式问题
+3. **类型转换**：智能处理数组/对象格式不匹配的情况
+4. **异常处理**：多层异常处理，确保流程不会中断
+5. **日志记录**：详细的错误日志，便于调试和问题定位
+6. **空值检查**：全面检查 `None` 值，避免 `AttributeError`
+
+#### 5. 测试建议
+
+建议测试以下场景：
+
+1. **Markdown 代码块包裹**：
+   ```json
+   ```json
+   {"domain": "example.com"}
+   ```
+   ```
+
+2. **格式不规范**：
+   ```json
+   {'domain': 'example.com',}  // 单引号 + 尾随逗号
+   ```
+
+3. **数组格式**：
+   ```json
+   [{"email": "test@example.com"}]
+   ```
+
+4. **混合文本**：
+   ```
+   以下是提取的结果：
+   {"domain": "example.com"}
+   ```
+
+5. **空响应**：
+   - 空字符串
+   - `None`
+   - 只有说明文字
+
+### 修改的文件
+
+- `findkp/service.py`: 添加了 JSON 容错处理机制
+
+### 相关技术点
+
+- **正则表达式**：用于提取 JSON 和修复格式
+- **括号匹配算法**：用于查找完整的 JSON 结构
+- **类型检查**：确保数据格式正确
+- **异常处理**：多层容错机制
+
+---

@@ -144,36 +144,6 @@ class SearchStrategy:
                     query_params["location"] = country_params["location"]
                 queries.append(query_params)
 
-            # 查询3: 英文名 + 本地名 + official website
-            query3 = f"{company_name_en} {company_name_local} official website"
-            if country:
-                query3 += f" {country}"
-            if query3 not in seen_queries:
-                seen_queries.add(query3)
-                query_params = {"q": query3}
-                if country_params["gl"]:
-                    query_params["gl"] = country_params["gl"]
-                if country_params["hl"]:
-                    query_params["hl"] = country_params["hl"]
-                if country_params["location"]:
-                    query_params["location"] = country_params["location"]
-                queries.append(query_params)
-
-            # 查询4: 本地名 + company website（本地化变体）
-            query4 = f"{company_name_local} company website"
-            if country:
-                query4 += f" {country}"
-            if query4 not in seen_queries:
-                seen_queries.add(query4)
-                query_params = {"q": query4}
-                if country_params["gl"]:
-                    query_params["gl"] = country_params["gl"]
-                if country_params["hl"]:
-                    query_params["hl"] = country_params["hl"]
-                if country_params["location"]:
-                    query_params["location"] = country_params["location"]
-                queries.append(query_params)
-
         logger.info(f"生成了 {len(queries)} 个公司信息查询")
         return queries
 
@@ -281,4 +251,3 @@ class SearchStrategy:
 
         logger.info(f"生成了 {len(queries)} 个{department}部门联系人查询")
         return queries
-

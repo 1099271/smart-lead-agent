@@ -66,3 +66,37 @@ class Contact(Base):
     )
 
     company = relationship("Company", back_populates="contacts")
+
+
+class SerperResponse(Base):
+    """Serper API 响应参数表模型"""
+
+    __tablename__ = "serper_responses"
+
+    trace_id = Column(String(36), primary_key=True, comment="UUID traceid")
+    q = Column(String(512), comment="搜索查询")
+    type = Column(String(50), comment="搜索类型 (search/image/videos)")
+    gl = Column(String(10), comment="国家代码")
+    hl = Column(String(10), comment="语言代码")
+    location = Column(String(100), comment="位置")
+    tbs = Column(String(50), comment="时间范围")
+    engine = Column(String(50), comment="搜索引擎")
+    credits = Column(Integer, comment="消耗的 credits")
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+
+class SerperOrganicResult(Base):
+    """Serper API 搜索结果表模型"""
+
+    __tablename__ = "serper_organic_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    trace_id = Column(
+        String(36), nullable=False, index=True, comment="关联响应的 traceid"
+    )
+    position = Column(Integer, comment="结果位置")
+    title = Column(String(512), comment="标题")
+    link = Column(String(1024), comment="链接")
+    snippet = Column(Text, comment="摘要")
+    date = Column(String(50), comment="日期（可选）")
+    created_at = Column(TIMESTAMP, server_default=func.now())
