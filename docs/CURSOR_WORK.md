@@ -2659,3 +2659,470 @@ LLM 响应
 - **异常处理**：多层容错机制
 
 ---
+
+## 2025-11-05 22:44:55 - 修复 KPInfo 模型验证错误：空字符串导致 Pydantic 验证失败
+
+### 需求描述
+
+修复 `KPInfo` 模型在验证时出现的错误：
+- `email` 字段为空字符串时，Pydantic 要求必须是有效的 EmailStr 格式，导致验证失败
+- `linkedin_url` 和 `twitter_url` 字段为空字符串时，Pydantic 尝试将其解析为 URL，导致验证失败
+
+错误信息：
+```
+3 validation errors for KPInfo
+email: value is not a valid email address: An email address must have an @-sign.
+linkedin_url: Input should be a valid URL, input is empty
+twitter_url: Input should be a valid URL, input is empty
+```
+
+### 实现逻辑
+
+#### 1. 问题分析
+
+**根本原因**：
+1. `KPInfo` 模型中 `email` 字段定义为必填的 `EmailStr`，但实际数据中可能为空字符串
+2. `linkedin_url` 和 `twitter_url` 虽然是 `Optional[HttpUrl]`，但空字符串会被 Pydantic 尝试解析为 URL，导致验证失败
+3. 数据库模型中 `email` 字段是 `nullable=False`，要求 email 不能为空
+
+**解决方案**：
+1. 修改 `KPInfo` 模型，将 `email` 改为 `Optional[EmailStr] = None`，允许为空
+2. 在创建 `KPInfo` 实例之前，将空字符串转换为 `None`
+3. 过滤掉没有 email 的联系人（因为数据库要求 email 不能为空）
+
+#### 2. 修复步骤
+
+**步骤 1：修改 `KPInfo` 模型定义**
+
+```python
+# schemas/contact.py
+class KPInfo(BaseModel):
+    email: Optional[EmailStr] = None  # 从 EmailStr 改为 Optional[EmailStr] = None
+    linkedin_url: Optional[HttpUrl] = None  # 保持不变
+    twitter_url: Optional[HttpUrl] = None  # 保持不变
+```
+
+**步骤 2：在 `service.py` 中添加数据清理逻辑**
+
+```python
+# findkp/service.py
+
+# 清理联系人数据：将空字符串转换为 None
+def clean_contact_data(data: dict) -> dict:
+    """清理联系人数据：将空字符串转换为 None"""
+    cleaned = {}
+    for key, value in data.items():
+        if value == "":
+            cleaned[key] = None
+        else:
+            cleaned[key] = value
+    return cleaned
+
+# 清理数据
+cleaned_contacts = [clean_contact_data(contact_data) for contact_data in contacts_to_save]
+
+# 过滤掉没有 email 的联系人（数据库要求 email 不能为空）
+valid_contacts = [
+    contact_data 
+    for contact_data in cleaned_contacts 
+    if contact_data.get("email")  # 必须有 email
+]
+```
+
+**步骤 3：在 `repository.py` 中添加防御性检查**
+
+```python
+# database/repository.py
+
+async def create_contact(self, contact_info: KPInfo, company_id: int):
+    # 防御性检查：email 不能为空（数据库要求）
+    if not contact_info.email:
+        raise ValueError(f"联系人 email 不能为空: {contact_info.full_name}")
+    # ...
+
+async def create_contacts_batch(self, contacts_info: List[KPInfo], company_id: int):
+    for contact_info in contacts_info:
+        # 防御性检查：email 不能为空（数据库要求）
+        if not contact_info.email:
+            continue  # 跳过没有 email 的联系人
+        # ...
+```
+
+#### 3. 数据流程
+
+```
+原始联系人数据
+    ↓
+清理空字符串 → None
+    ↓
+过滤没有 email 的联系人
+    ↓
+创建 KPInfo 实例（Pydantic 验证通过）
+    ↓
+保存到数据库（email 必填，已确保不为空）
+```
+
+#### 4. 关键改进点总结
+
+1. **模型灵活性**：`email` 字段改为可选，允许在业务逻辑层处理空值情况
+2. **数据清理**：统一将空字符串转换为 `None`，避免 Pydantic 验证错误
+3. **业务逻辑过滤**：在保存前过滤掉没有 email 的联系人，满足数据库约束
+4. **防御性编程**：在 repository 层也添加检查，确保数据完整性
+5. **日志记录**：记录过滤掉的联系人数量，便于监控和调试
+
+#### 5. 错误处理流程
+
+```
+准备联系人数据
+    ↓
+清理空字符串
+    ↓
+过滤无效联系人（没有 email）
+    ↓
+尝试批量保存
+    ├─→ 成功 → 完成
+    └─→ 失败 → 降级为单个保存
+        ├─→ 成功 → 继续下一个
+        └─→ 失败 → 记录错误日志，跳过
+```
+
+### 修改的文件
+
+- `schemas/contact.py`: 将 `email` 字段改为 `Optional[EmailStr] = None`
+- `findkp/service.py`: 添加数据清理和过滤逻辑
+- `database/repository.py`: 添加防御性检查，确保 email 不为空
+
+### 相关技术点
+
+- **Pydantic 验证**：空字符串 vs None 的处理
+- **EmailStr 验证**：必须包含 @ 符号
+- **HttpUrl 验证**：空字符串会被尝试解析为 URL
+- **数据库约束**：`nullable=False` 字段的处理
+- **防御性编程**：多层数据验证确保数据完整性
+
+---
+
+## 2025-11-05 23:04:06 - 优化 FindKP 流程：添加缓存检查机制避免重复搜索
+
+### 需求描述
+
+优化 `find_kps` 方法，在开始搜索前先检查缓存：
+1. 检查 `companies` 表中是否存在已完成的记录
+2. 如果公司已完成且联系人已存在，直接返回现有联系人，跳过搜索
+3. 如果公司已完成但联系人不存在，继续执行搜索流程（可能之前搜索失败）
+4. 只有公司未完成或联系人不存在时才执行完整的搜索流程
+
+**优化目标**：
+- 避免重复搜索已完成的公司，节省 API 调用成本
+- 提高响应速度，对于已完成的公司直接返回缓存结果
+- 减少不必要的 LLM 调用和外部 API 请求
+
+### 实现逻辑
+
+#### 1. 问题分析
+
+**现状**：
+- 每次调用 `find_kps` 都会执行完整的搜索流程
+- 即使公司已经完成搜索，仍会重复调用搜索 API 和 LLM
+- 没有利用已有的数据库记录
+
+**优化方案**：
+- 在方法开始时检查公司状态
+- 如果公司已完成且联系人已存在，直接返回
+- 如果公司已完成但联系人不存在，继续搜索（可能之前失败）
+
+#### 2. 实现步骤
+
+**步骤 1：在 Repository 中添加查询方法**
+
+```python
+# database/repository.py
+
+async def get_company_by_name(self, name: str) -> Optional[models.Company]:
+    """
+    根据公司名称获取公司（如果不存在则返回 None）
+    """
+    result = await self.db.execute(
+        select(models.Company).filter(models.Company.name == name)
+    )
+    return result.scalar_one_or_none()
+```
+
+**步骤 2：在 `find_kps` 方法开始时添加缓存检查**
+
+```python
+# findkp/service.py
+
+async def find_kps(self, ...):
+    repo = Repository(db)
+    
+    try:
+        # 0. 检查缓存：如果公司已完成且联系人已存在，直接返回
+        company = await repo.get_company_by_name(company_name_en)
+        if company and company.status == CompanyStatus.completed:
+            logger.info(f"公司 {company_name_en} 已完成，查询现有联系人...")
+            existing_contacts = await repo.get_contacts_by_company(company.id)
+            
+            if existing_contacts:
+                logger.info(f"找到 {len(existing_contacts)} 个现有联系人，直接返回")
+                # 将 Contact 对象转换为 KPInfo
+                kp_info_list = [
+                    KPInfo(
+                        full_name=contact.full_name,
+                        email=contact.email,
+                        role=contact.role,
+                        department=contact.department,
+                        linkedin_url=contact.linkedin_url if contact.linkedin_url else None,
+                        twitter_url=contact.twitter_url if contact.twitter_url else None,
+                        source=contact.source or "N/A",
+                        confidence_score=float(contact.confidence_score or 0.0),
+                    )
+                    for contact in existing_contacts
+                ]
+                return {
+                    "company_id": company.id,
+                    "company_domain": company.domain,
+                    "contacts": kp_info_list,
+                }
+            else:
+                logger.info(
+                    f"公司 {company_name_en} 已完成，但未找到联系人，继续搜索..."
+                )
+                # 继续执行搜索流程（可能之前搜索失败，但公司状态被标记为完成）
+        
+        # 1. 生成搜索查询（原有的搜索流程）
+        # ...
+```
+
+#### 3. 数据流程
+
+```
+find_kps 方法调用
+    ↓
+检查公司是否存在且已完成
+    ├─→ 是 → 查询现有联系人
+    │   ├─→ 联系人存在 → 转换为 KPInfo → 直接返回
+    │   └─→ 联系人不存在 → 继续搜索流程
+    └─→ 否 → 执行完整搜索流程
+        ↓
+    生成搜索查询
+        ↓
+    执行搜索和 LLM 提取
+        ↓
+    保存结果
+```
+
+#### 4. 关键改进点总结
+
+1. **缓存机制**：利用数据库中的已完成记录，避免重复搜索
+2. **性能优化**：跳过已完成的公司，大幅减少 API 调用和 LLM 调用
+3. **成本控制**：避免重复调用外部 API（Serper、Google Search），节省成本
+4. **数据转换**：正确将 Contact 对象转换为 KPInfo，处理 URL 字段的空值情况
+5. **容错处理**：如果公司已完成但联系人不存在，继续执行搜索（可能之前失败）
+
+#### 5. 优化效果
+
+**性能提升**：
+- 已完成的公司：响应时间从数秒降至毫秒级（数据库查询）
+- 减少外部 API 调用：避免重复调用 Serper/Google Search API
+- 减少 LLM 调用：避免重复调用 GPT-4o 提取信息
+
+**成本节省**：
+- 避免重复的搜索 API 调用（Serper credits）
+- 避免重复的 LLM API 调用（OpenAI tokens）
+- 减少数据库写入操作
+
+**用户体验**：
+- 快速返回已完成的公司结果
+- 减少等待时间
+- 提高系统响应速度
+
+### 修改的文件
+
+- `database/repository.py`: 添加 `get_company_by_name()` 方法
+- `findkp/service.py`: 在 `find_kps()` 方法开始时添加缓存检查逻辑
+
+### 相关技术点
+
+- **缓存策略**：利用数据库记录作为缓存
+- **状态管理**：使用 `CompanyStatus.completed` 标记已完成状态
+- **数据转换**：Contact 对象到 KPInfo 的转换
+- **性能优化**：提前返回，避免不必要的计算
+- **成本控制**：减少重复的 API 调用
+
+---
+
+## 2025-11-05 23:07:52 - 优化 FindKP 流程：公司已完成时仅搜索联系人，跳过公司信息搜索
+
+### 需求描述
+
+进一步优化 `find_kps` 方法的缓存逻辑：
+- 如果公司已完成且联系人已存在 → 直接返回现有联系人
+- 如果公司已完成但联系人不存在 → **仅搜索联系人，跳过公司信息搜索**
+- 如果公司不存在或未完成 → 执行完整流程（公司信息 + 联系人）
+
+**优化目标**：
+- 避免重复搜索已完成的公司信息，节省 API 调用成本
+- 提高响应速度，对于已完成的公司直接搜索联系人
+- 减少不必要的 LLM 调用和外部 API 请求
+
+### 实现逻辑
+
+#### 1. 问题分析
+
+**之前的实现**：
+- 如果公司已完成但联系人不存在，仍会执行完整的搜索流程（包括公司信息搜索）
+- 浪费了 API 调用和 LLM 调用资源
+
+**优化方案**：
+- 提取联系人搜索和保存逻辑为独立方法 `_search_and_save_contacts`
+- 如果公司已完成但联系人不存在，直接调用该方法搜索联系人
+- 跳过公司信息搜索步骤（步骤 1-5）
+
+#### 2. 实现步骤
+
+**步骤 1：提取联系人搜索和保存逻辑为独立方法**
+
+```python
+# findkp/service.py
+
+async def _search_and_save_contacts(
+    self,
+    company: Company,
+    company_name_en: str,
+    company_name_local: str,
+    country: Optional[str],
+    country_context: str,
+    db: AsyncSession,
+    repo: Repository,
+) -> List[KPInfo]:
+    """
+    搜索并保存联系人（独立方法，可被复用）
+    
+    包含：
+    1. 并行搜索采购和销售部门 KP
+    2. 准备联系人数据
+    3. 清理和验证数据
+    4. 批量保存联系人
+    """
+    # ... 联系人搜索和保存逻辑
+```
+
+**步骤 2：优化 `find_kps` 方法的缓存检查逻辑**
+
+```python
+# findkp/service.py
+
+async def find_kps(self, ...):
+    repo = Repository(db)
+    
+    try:
+        # 0. 检查缓存
+        company = await repo.get_company_by_name(company_name_en)
+        if company and company.status == CompanyStatus.completed:
+            existing_contacts = await repo.get_contacts_by_company(company.id)
+            
+            if existing_contacts:
+                # 情况 1: 联系人已存在，直接返回
+                return {...}
+            else:
+                # 情况 2: 公司已完成但联系人不存在，仅搜索联系人
+                logger.info("公司已完成，但未找到联系人，仅搜索联系人...")
+                
+                country_context = self._get_country_context(country)
+                company.status = CompanyStatus.processing
+                await db.commit()
+                
+                # 直接搜索并保存联系人（跳过公司信息搜索）
+                all_contacts = await self._search_and_save_contacts(
+                    company, company_name_en, company_name_local,
+                    country, country_context, db, repo
+                )
+                
+                company.status = CompanyStatus.completed
+                await db.commit()
+                return {...}
+        
+        # 情况 3: 公司不存在或未完成，执行完整流程
+        # 1. 生成搜索查询（公司信息）
+        # 2. 执行搜索和 LLM 提取
+        # 3. 创建或更新公司记录
+        # 4. 搜索并保存联系人
+        all_contacts = await self._search_and_save_contacts(...)
+        # ...
+```
+
+#### 3. 数据流程
+
+```
+find_kps 方法调用
+    ↓
+检查公司是否存在且已完成
+    ├─→ 是 → 查询现有联系人
+    │   ├─→ 联系人存在 → 转换为 KPInfo → 直接返回
+    │   └─→ 联系人不存在 → 仅搜索联系人（跳过公司信息搜索）
+    │       ↓
+    │       并行搜索采购和销售部门 KP
+    │       ↓
+    │       保存联系人
+    │       ↓
+    │       更新公司状态 → 返回
+    └─→ 否 → 执行完整搜索流程
+        ↓
+    生成搜索查询（公司信息）
+        ↓
+    执行搜索和 LLM 提取
+        ↓
+    创建或更新公司记录
+        ↓
+    搜索并保存联系人（复用 _search_and_save_contacts）
+        ↓
+    更新公司状态 → 返回
+```
+
+#### 4. 关键改进点总结
+
+1. **代码复用**：提取联系人搜索逻辑为独立方法，避免代码重复
+2. **性能优化**：已完成的公司跳过公司信息搜索，直接搜索联系人
+3. **成本控制**：避免重复调用公司信息搜索 API 和 LLM
+4. **逻辑清晰**：三种情况的处理逻辑更加清晰
+5. **可维护性**：联系人搜索逻辑集中在一个方法中，便于维护和测试
+
+#### 5. 优化效果对比
+
+**之前（公司已完成但联系人不存在）**：
+```
+1. 生成公司搜索查询
+2. 执行公司搜索 API 调用
+3. LLM 提取公司信息
+4. 搜索联系人
+5. 保存联系人
+```
+
+**现在（公司已完成但联系人不存在）**：
+```
+1. 搜索联系人（直接）
+2. 保存联系人
+```
+
+**节省的成本**：
+- 减少公司信息搜索 API 调用（Serper/Google Search）
+- 减少 LLM 调用（GPT-4o 提取公司信息）
+- 减少响应时间（跳过公司信息搜索步骤）
+
+### 修改的文件
+
+- `findkp/service.py`: 
+  - 添加 `_search_and_save_contacts()` 方法（提取联系人搜索和保存逻辑）
+  - 优化 `find_kps()` 方法的缓存检查逻辑
+  - 添加 `Company` 导入
+
+### 相关技术点
+
+- **代码重构**：提取公共逻辑为独立方法
+- **缓存策略**：利用数据库记录作为缓存
+- **性能优化**：跳过不必要的步骤
+- **成本控制**：减少重复的 API 调用
+- **代码复用**：DRY 原则（Don't Repeat Yourself）
+
+---

@@ -17,7 +17,7 @@ class KPInfo(BaseModel):
     """单个 KP 信息"""
 
     full_name: Optional[str] = None
-    email: EmailStr
+    email: Optional[EmailStr] = None
     role: Optional[str] = None
     department: Optional[str] = None  # "采购" or "销售"
     linkedin_url: Optional[HttpUrl] = None

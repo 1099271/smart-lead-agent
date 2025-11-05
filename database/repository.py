@@ -27,12 +27,25 @@ class Repository:
             await self.db.refresh(company)
         return company
 
+    async def get_company_by_name(self, name: str) -> Optional[models.Company]:
+        """
+        根据公司名称获取公司（如果不存在则返回 None）
+        """
+        result = await self.db.execute(
+            select(models.Company).filter(models.Company.name == name)
+        )
+        return result.scalar_one_or_none()
+
     async def create_contact(
         self, contact_info: KPInfo, company_id: int
     ) -> models.Contact:
         """
         创建一个新的联系人记录 - FindKP 板块（异步版本）
         """
+        # 防御性检查：email 不能为空（数据库要求）
+        if not contact_info.email:
+            raise ValueError(f"联系人 email 不能为空: {contact_info.full_name}")
+
         contact = models.Contact(
             company_id=company_id,
             full_name=contact_info.full_name,
@@ -68,6 +81,10 @@ class Repository:
         """
         contacts = []
         for contact_info in contacts_info:
+            # 防御性检查：email 不能为空（数据库要求）
+            if not contact_info.email:
+                continue  # 跳过没有 email 的联系人
+
             contact = models.Contact(
                 company_id=company_id,
                 full_name=contact_info.full_name,

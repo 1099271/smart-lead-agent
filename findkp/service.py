@@ -8,7 +8,7 @@ from typing import List, Dict, Optional, Any, Union
 from sqlalchemy.ext.asyncio import AsyncSession
 from llm import get_llm
 from database.repository import Repository
-from database.models import CompanyStatus
+from database.models import CompanyStatus, Company
 from schemas.contact import KPInfo
 from core.search import SerperSearchProvider, GoogleSearchProvider
 from .prompts import EXTRACT_COMPANY_INFO_PROMPT, EXTRACT_CONTACTS_PROMPT
@@ -437,6 +437,245 @@ class FindKPService:
             # 确保总是返回有效的字典
             return {"contacts": [], "results": []}
 
+    async def _search_and_save_company_info(
+        self,
+        company_name_en: str,
+        company_name_local: str,
+        country: Optional[str],
+        db: AsyncSession,
+        repo: Repository,
+    ) -> Company:
+        """
+        搜索并保存公司信息
+
+        Args:
+            company_name_en: 公司名称英文
+            company_name_local: 公司名称本地
+            country: 国家名称（可选）
+            db: 异步数据库会话
+            repo: Repository 实例
+
+        Returns:
+            Company 对象（已创建或更新的公司记录）
+        """
+        # 1. 生成搜索查询
+        logger.info(
+            f"开始搜索公司信息: {company_name_local}"
+            + (f" ({country})" if country else "")
+        )
+        company_queries = self.search_strategy.generate_company_queries(
+            company_name_en, company_name_local, country
+        )
+
+        # 2. 并行执行多工具搜索
+        company_results_map = await self._search_with_multiple_providers(
+            company_queries, db=db
+        )
+
+        # 3. 聚合结果
+        aggregated_company_results = self.result_aggregator.aggregate(
+            company_results_map
+        )
+
+        # 4. 转换为字典格式用于 LLM
+        company_results = [
+            {"title": r.title, "link": str(r.link), "snippet": r.snippet}
+            for r in aggregated_company_results
+        ]
+
+        # 5. LLM 提取公司信息
+        country_context = self._get_country_context(country)
+        company_info = await self.extract_with_llm(
+            EXTRACT_COMPANY_INFO_PROMPT.format(
+                country_context=country_context,
+                search_results=json.dumps(company_results, ensure_ascii=False),
+            )
+        )
+
+        # 6. 创建或获取公司记录
+        company = await repo.get_or_create_company(company_name_en)
+        company.domain = company_info.get("domain")
+        company.industry = company_info.get("industry")
+        company.positioning = company_info.get("positioning")
+        company.brief = company_info.get("brief")
+        company.status = CompanyStatus.processing
+        await db.commit()
+        await db.refresh(company)
+        logger.info(f"公司记录已创建/更新: {company.name}")
+
+        return company
+
+    async def _search_and_save_contacts(
+        self,
+        company: Company,
+        company_name_en: str,
+        company_name_local: str,
+        country: Optional[str],
+        country_context: str,
+        db: AsyncSession,
+        repo: Repository,
+    ) -> List[KPInfo]:
+        """
+        搜索并保存联系人（独立方法，可被复用）
+
+        Args:
+            company: 公司对象
+            company_name_en: 公司名称英文
+            company_name_local: 公司名称本地
+            country: 国家名称（可选）
+            country_context: 国家上下文信息
+            db: 异步数据库会话
+            repo: Repository 实例
+
+        Returns:
+            保存的联系人列表（KPInfo）
+        """
+        # 1. 并行搜索采购和销售部门 KP
+        logger.info(
+            f"并行搜索采购和销售部门 KP: {company_name_en}"
+            + (f" ({country})" if country else "")
+        )
+
+        # 并行执行采购和销售搜索
+        procurement_task = self._search_contacts_parallel(
+            company_name_en,
+            company_name_local,
+            country,
+            "采购",
+            country_context,
+            db,
+        )
+        sales_task = self._search_contacts_parallel(
+            company_name_en,
+            company_name_local,
+            country,
+            "销售",
+            country_context,
+            db,
+        )
+
+        procurement_result, sales_result = await asyncio.gather(
+            procurement_task, sales_task, return_exceptions=True
+        )
+
+        # 处理异常情况和 None 值
+        if isinstance(procurement_result, Exception):
+            logger.error(f"采购部门搜索失败: {procurement_result}")
+            procurement_result = {"contacts": [], "results": []}
+        elif procurement_result is None:
+            logger.error("采购部门搜索返回 None")
+            procurement_result = {"contacts": [], "results": []}
+        elif not isinstance(procurement_result, dict):
+            logger.error(f"采购部门搜索返回无效类型: {type(procurement_result)}")
+            procurement_result = {"contacts": [], "results": []}
+
+        if isinstance(sales_result, Exception):
+            logger.error(f"销售部门搜索失败: {sales_result}")
+            sales_result = {"contacts": [], "results": []}
+        elif sales_result is None:
+            logger.error("销售部门搜索返回 None")
+            sales_result = {"contacts": [], "results": []}
+        elif not isinstance(sales_result, dict):
+            logger.error(f"销售部门搜索返回无效类型: {type(sales_result)}")
+            sales_result = {"contacts": [], "results": []}
+
+        procurement_contacts = procurement_result.get("contacts", [])
+        procurement_results = procurement_result.get("results", [])
+        sales_contacts = sales_result.get("contacts", [])
+        sales_results = sales_result.get("results", [])
+
+        # 确保返回的是列表
+        if not isinstance(procurement_contacts, list):
+            procurement_contacts = []
+        if not isinstance(sales_contacts, list):
+            sales_contacts = []
+
+        # 2. 准备联系人数据
+        contacts_to_save = []
+
+        for contact_data in procurement_contacts:
+            try:
+                contact_data["department"] = "采购"
+                if not contact_data.get("source") and procurement_results:
+                    contact_data["source"] = procurement_results[0].get("link", "N/A")
+                elif not contact_data.get("source"):
+                    contact_data["source"] = "N/A"
+                contacts_to_save.append(contact_data)
+            except Exception as e:
+                logger.error(f"准备采购联系人数据失败: {e}, 数据: {contact_data}")
+                continue
+
+        for contact_data in sales_contacts:
+            try:
+                contact_data["department"] = "销售"
+                if not contact_data.get("source") and sales_results:
+                    contact_data["source"] = sales_results[0].get("link", "N/A")
+                elif not contact_data.get("source"):
+                    contact_data["source"] = "N/A"
+                contacts_to_save.append(contact_data)
+            except Exception as e:
+                logger.error(f"准备销售联系人数据失败: {e}, 数据: {contact_data}")
+                continue
+
+        # 3. 清理联系人数据：将空字符串转换为 None，并过滤无效数据
+        def clean_contact_data(data: dict) -> dict:
+            """清理联系人数据：将空字符串转换为 None"""
+            cleaned = {}
+            for key, value in data.items():
+                if value == "":
+                    cleaned[key] = None
+                else:
+                    cleaned[key] = value
+            return cleaned
+
+        # 清理数据
+        cleaned_contacts = [
+            clean_contact_data(contact_data) for contact_data in contacts_to_save
+        ]
+
+        # 过滤掉没有 email 的联系人（数据库要求 email 不能为空）
+        valid_contacts = [
+            contact_data
+            for contact_data in cleaned_contacts
+            if contact_data.get("email")  # 必须有 email
+        ]
+
+        if len(cleaned_contacts) > len(valid_contacts):
+            logger.warning(
+                f"过滤掉 {len(cleaned_contacts) - len(valid_contacts)} 个没有 email 的联系人"
+            )
+
+        # 4. 批量保存联系人
+        all_contacts = []
+        if valid_contacts:
+            logger.info(f"批量保存 {len(valid_contacts)} 个联系人...")
+            try:
+                # 转换为 KPInfo 对象列表
+                kp_info_list = [
+                    KPInfo(**contact_data) for contact_data in valid_contacts
+                ]
+                # 批量保存
+                saved_contacts = await repo.create_contacts_batch(
+                    kp_info_list, company.id
+                )
+                all_contacts = kp_info_list
+                logger.info(f"成功保存 {len(saved_contacts)} 个联系人")
+            except Exception as e:
+                logger.error(f"批量保存联系人失败: {e}", exc_info=True)
+                # 降级为单个保存
+                logger.info("降级为单个保存模式...")
+                for contact_data in valid_contacts:
+                    try:
+                        kp_info = KPInfo(**contact_data)
+                        contact = await repo.create_contact(kp_info, company.id)
+                        all_contacts.append(kp_info)
+                        logger.debug(f"联系人已保存: {contact.email}")
+                    except Exception as e2:
+                        logger.error(f"保存联系人失败: {e2}, 数据: {contact_data}")
+                        continue
+
+        return all_contacts
+
     async def find_kps(
         self,
         company_name_en: str,
@@ -459,176 +698,98 @@ class FindKPService:
         repo = Repository(db)
 
         try:
-            # 1. 生成搜索查询
-            logger.info(
-                f"开始搜索公司信息: {company_name_local}"
-                + (f" ({country})" if country else "")
-            )
-            company_queries = self.search_strategy.generate_company_queries(
-                company_name_en, company_name_local, country
-            )
+            # 0. 检查缓存：如果公司已完成且联系人已存在，直接返回
+            company = await repo.get_company_by_name(company_name_en)
+            if company and company.status == CompanyStatus.completed:
+                logger.info(f"公司 {company_name_en} 已完成，查询现有联系人...")
+                existing_contacts = await repo.get_contacts_by_company(company.id)
 
-            # 2. 并行执行多工具搜索
-            company_results_map = await self._search_with_multiple_providers(
-                company_queries, db=db
-            )
-
-            # 3. 聚合结果
-            aggregated_company_results = self.result_aggregator.aggregate(
-                company_results_map
-            )
-
-            # 4. 转换为字典格式用于 LLM
-            company_results = [
-                {"title": r.title, "link": str(r.link), "snippet": r.snippet}
-                for r in aggregated_company_results
-            ]
-
-            # 5. LLM 提取公司信息
-            country_context = self._get_country_context(country)
-            company_info = await self.extract_with_llm(
-                EXTRACT_COMPANY_INFO_PROMPT.format(
-                    country_context=country_context,
-                    search_results=json.dumps(company_results, ensure_ascii=False),
-                )
-            )
-
-            # 2. 创建或获取公司记录
-            company = await repo.get_or_create_company(company_name_en)
-            company.domain = company_info.get("domain")
-            company.industry = company_info.get("industry")
-            company.positioning = company_info.get("positioning")
-            company.brief = company_info.get("brief")
-            company.status = CompanyStatus.processing
-            await db.commit()
-            await db.refresh(company)
-            logger.info(f"公司记录已创建/更新: {company.name}")
-
-            # 6. 并行搜索采购和销售部门 KP
-            logger.info(
-                f"并行搜索采购和销售部门 KP: {company_name_en}"
-                + (f" ({country})" if country else "")
-            )
-
-            # 并行执行采购和销售搜索
-            procurement_task = self._search_contacts_parallel(
-                company_name_en,
-                company_name_local,
-                country,
-                "采购",
-                country_context,
-                db,
-            )
-            sales_task = self._search_contacts_parallel(
-                company_name_en,
-                company_name_local,
-                country,
-                "销售",
-                country_context,
-                db,
-            )
-
-            procurement_result, sales_result = await asyncio.gather(
-                procurement_task, sales_task, return_exceptions=True
-            )
-
-            # 处理异常情况和 None 值
-            if isinstance(procurement_result, Exception):
-                logger.error(f"采购部门搜索失败: {procurement_result}")
-                procurement_result = {"contacts": [], "results": []}
-            elif procurement_result is None:
-                logger.error("采购部门搜索返回 None")
-                procurement_result = {"contacts": [], "results": []}
-            elif not isinstance(procurement_result, dict):
-                logger.error(f"采购部门搜索返回无效类型: {type(procurement_result)}")
-                procurement_result = {"contacts": [], "results": []}
-
-            if isinstance(sales_result, Exception):
-                logger.error(f"销售部门搜索失败: {sales_result}")
-                sales_result = {"contacts": [], "results": []}
-            elif sales_result is None:
-                logger.error("销售部门搜索返回 None")
-                sales_result = {"contacts": [], "results": []}
-            elif not isinstance(sales_result, dict):
-                logger.error(f"销售部门搜索返回无效类型: {type(sales_result)}")
-                sales_result = {"contacts": [], "results": []}
-
-            procurement_contacts = procurement_result.get("contacts", [])
-            procurement_results = procurement_result.get("results", [])
-            sales_contacts = sales_result.get("contacts", [])
-            sales_results = sales_result.get("results", [])
-
-            # 确保返回的是列表
-            if not isinstance(procurement_contacts, list):
-                procurement_contacts = []
-            if not isinstance(sales_contacts, list):
-                sales_contacts = []
-
-            # 8. 批量保存联系人
-            all_contacts = []
-            contacts_to_save = []
-
-            # 准备联系人数据
-            for contact_data in procurement_contacts:
-                try:
-                    contact_data["department"] = "采购"
-                    if not contact_data.get("source") and procurement_results:
-                        contact_data["source"] = procurement_results[0].get(
-                            "link", "N/A"
-                        )
-                    elif not contact_data.get("source"):
-                        contact_data["source"] = "N/A"
-                    contacts_to_save.append(contact_data)
-                except Exception as e:
-                    logger.error(f"准备采购联系人数据失败: {e}, 数据: {contact_data}")
-                    continue
-
-            for contact_data in sales_contacts:
-                try:
-                    contact_data["department"] = "销售"
-                    if not contact_data.get("source") and sales_results:
-                        contact_data["source"] = sales_results[0].get("link", "N/A")
-                    elif not contact_data.get("source"):
-                        contact_data["source"] = "N/A"
-                    contacts_to_save.append(contact_data)
-                except Exception as e:
-                    logger.error(f"准备销售联系人数据失败: {e}, 数据: {contact_data}")
-                    continue
-
-            # 批量保存
-            if contacts_to_save:
-                logger.info(f"批量保存 {len(contacts_to_save)} 个联系人...")
-                try:
-                    # 转换为 KPInfo 对象列表
+                if existing_contacts:
+                    logger.info(f"找到 {len(existing_contacts)} 个现有联系人，直接返回")
+                    # 将 Contact 对象转换为 KPInfo
                     kp_info_list = [
-                        KPInfo(**contact_data) for contact_data in contacts_to_save
+                        KPInfo(
+                            full_name=contact.full_name,
+                            email=contact.email,
+                            role=contact.role,
+                            department=contact.department,
+                            linkedin_url=(
+                                contact.linkedin_url if contact.linkedin_url else None
+                            ),
+                            twitter_url=(
+                                contact.twitter_url if contact.twitter_url else None
+                            ),
+                            source=contact.source or "N/A",
+                            confidence_score=float(contact.confidence_score or 0.0),
+                        )
+                        for contact in existing_contacts
                     ]
-                    # 批量保存
-                    saved_contacts = await repo.create_contacts_batch(
-                        kp_info_list, company.id
+                    return {
+                        "company_id": company.id,
+                        "company_domain": company.domain,
+                        "contacts": kp_info_list,
+                    }
+                else:
+                    # 公司已完成但联系人不存在，只搜索联系人，跳过公司信息搜索
+                    logger.info(
+                        f"公司 {company_name_en} 已完成，但未找到联系人，仅搜索联系人..."
                     )
-                    all_contacts = kp_info_list
-                    logger.info(f"成功保存 {len(saved_contacts)} 个联系人")
-                except Exception as e:
-                    logger.error(f"批量保存联系人失败: {e}", exc_info=True)
-                    # 降级为单个保存
-                    logger.info("降级为单个保存模式...")
-                    for contact_data in contacts_to_save:
-                        try:
-                            kp_info = KPInfo(**contact_data)
-                            contact = await repo.create_contact(kp_info, company.id)
-                            all_contacts.append(kp_info)
-                            logger.debug(f"联系人已保存: {contact.email}")
-                        except Exception as e2:
-                            logger.error(f"保存联系人失败: {e2}, 数据: {contact_data}")
-                            continue
+                    country_context = self._get_country_context(country)
 
-            # 9. 更新公司状态
+                    # 更新公司状态为处理中
+                    company.status = CompanyStatus.processing
+                    await db.commit()
+
+                    # 直接搜索并保存联系人
+                    all_contacts = await self._search_and_save_contacts(
+                        company,
+                        company_name_en,
+                        company_name_local,
+                        country,
+                        country_context,
+                        db,
+                        repo,
+                    )
+
+                    # 更新公司状态为已完成
+                    company.status = CompanyStatus.completed
+                    await db.commit()
+                    logger.info(
+                        f"FindKP 流程完成: {company_name_en}, 找到 {len(all_contacts)} 个联系人"
+                    )
+
+                    return {
+                        "company_id": company.id,
+                        "company_domain": company.domain,
+                        "contacts": all_contacts,
+                    }
+            company = await self._search_and_save_company_info(
+                company_name_en,
+                company_name_local,
+                country,
+                db,
+                repo,
+            )
+            country_context = self._get_country_context(country)
+
+            # 6. 搜索并保存联系人
+            all_contacts = await self._search_and_save_contacts(
+                company,
+                company_name_en,
+                company_name_local,
+                country,
+                country_context,
+                db,
+                repo,
+            )
+
+            # 更新公司状态
             company.status = CompanyStatus.completed
             await db.commit()
             logger.info(
                 f"FindKP 流程完成: {company_name_en}, 找到 {len(all_contacts)} 个联系人"
             )
+            logger.debug(f"公司状态已更新为: {company.status.value}")
 
             return {
                 "company_id": company.id,
