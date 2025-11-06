@@ -4047,3 +4047,108 @@ Repository.get_or_create_company(name, local_name)
 3. **数据完整性**：`local_name` 字段允许为空，因为某些公司可能没有本地名称
 
 ---
+
+## 2025-11-06 21:36:18 - 创建批量 FindKP CLI 命令（简化版）
+
+### 需求描述
+
+在 CLI 中创建一个命令，能够从 `trade_records` 表中批量查询公司数据（`importer` 和 `importer_en`），然后对每个公司执行 FindKP 操作，自动查找关键联系人。
+
+### 实现逻辑
+
+#### 1. 架构设计
+
+```mermaid
+graph TD
+    A[CLI 命令: batch-findkp] --> B[查询 trade_records 表]
+    B --> C[去重公司列表]
+    C --> D[遍历每个公司]
+    D --> E{是否跳过已有联系人?}
+    E -->|是| F[检查公司是否已有联系人]
+    F -->|有| G[跳过]
+    F -->|无| H[执行 FindKP]
+    E -->|否| H[执行 FindKP]
+    H --> I[保存联系人]
+    I --> J[统计结果]
+    G --> J
+    J --> K[输出统计信息]
+```
+
+#### 2. 简化实现
+
+直接查询 `trade_records` 表的 `importer` 和 `importer_en` 字段，无需复杂的 Repository 方法：
+
+**查询逻辑**：
+- 使用 SQLAlchemy 的 `select()` 直接查询 `TradeRecord.importer` 和 `TradeRecord.importer_en`
+- 过滤掉空值和空字符串
+- 使用 Python `set` 对 `(importer_en, importer)` 元组进行去重
+- 如果 `importer_en` 为空，则使用 `importer` 作为英文名称
+
+#### 3. CLI 命令实现
+
+创建了 `cli/batch_findkp.py` 文件，实现简化的批量处理命令：
+
+**命令参数**：
+- `--verbose/-v`: 显示详细日志（唯一参数）
+
+**处理流程**：
+1. 直接查询 `trade_records` 表，获取所有 `importer` 和 `importer_en` 字段
+2. 使用 Python `set` 对 `(importer_en, importer)` 元组进行去重
+3. 遍历每个去重后的公司：
+   - 调用 `FindKPService.find_kps()` 执行 FindKP 操作
+   - 提交事务并统计结果
+   - 如果失败，记录错误并继续处理下一个
+4. 输出统计信息：总数、成功、失败、总联系人数
+
+#### 4. 命令注册
+
+在 `cli/main.py` 中注册新命令：
+```python
+from cli.batch_findkp import batch_findkp
+cli.add_command(batch_findkp)
+```
+
+#### 5. 错误处理
+
+- 每个公司的处理都有独立的 try-catch
+- 失败时回滚事务，不影响其他公司的处理
+- 记录失败的公司列表，最后统一输出
+- 支持用户中断（Ctrl+C）
+
+#### 6. 进度显示
+
+- 显示当前处理进度：`[当前/总数]`
+- 显示每个公司的基本信息：英文名称、本地名称
+- 显示处理结果：成功/失败、找到的联系人数量
+- 最后显示总体统计信息
+
+### 修改文件清单
+
+1. ✅ `cli/batch_findkp.py` - 创建简化的批量 FindKP 命令文件
+2. ✅ `cli/main.py` - 注册新命令
+
+### 技术要点
+
+1. **简单查询**：直接使用 SQLAlchemy `select()` 查询 `importer` 和 `importer_en` 字段
+2. **Python 去重**：使用 `set` 对 `(importer_en, importer)` 元组进行去重，简单高效
+3. **事务管理**：每个公司的处理都有独立的事务，失败不影响其他公司
+4. **异步处理**：使用 `async/await` 保持与 FastAPI 架构一致
+5. **简化参数**：只保留 `--verbose` 参数，去除复杂的分页、延迟等功能
+
+### 使用示例
+
+```bash
+# 基本用法：处理所有公司
+smart-lead batch-findkp
+
+# 显示详细日志
+smart-lead batch-findkp --verbose
+```
+
+### 注意事项
+
+1. **数据量**：如果 `trade_records` 表数据量很大，建议分批处理或添加限制
+2. **API 限流**：批量处理时注意 API 限流，可能需要手动控制处理速度
+3. **内存使用**：去重操作在内存中进行，如果数据量特别大，可能需要优化
+
+---
