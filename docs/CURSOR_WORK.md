@@ -1989,7 +1989,8 @@ smart-lead findkp --company-name-en "Apple Inc." --company-name-local "苹果公
 ### 需求描述
 
 在 `.env.example` 中已经添加了三个新的国内模型配置：
-- GLM（智谱AI）：`GLM_API_KEY`
+
+- GLM（智谱 AI）：`GLM_API_KEY`
 - Qwen（通义千问）：`QWEN_API_KEY`、`QWEN_MODEL`
 - DeepSeek（已存在）：`DEEPSEEK_API_KEY`
 
@@ -2005,28 +2006,28 @@ smart-lead findkp --company-name-en "Apple Inc." --company-name-local "苹果公
 graph TB
     A[业务服务层<br/>findkp/service.py] --> B[LLM 工厂<br/>llm.get_llm]
     B --> C[LLMRouter<br/>路由判断]
-    
+
     C --> D{模型名称匹配}
     D -->|deepseek-chat<br/>deepseek-coder| E[DeepSeek 路径]
     D -->|glm-4<br/>glm-4-plus<br/>glm-4-flash| F[GLM 路径]
     D -->|qwen-turbo<br/>qwen-plus<br/>qwen-max| G[Qwen 路径]
     D -->|gpt-*<br/>claude-*| H[OpenRouter 路径]
-    
+
     E --> I[_create_deepseek_llm]
     F --> J[_create_glm_llm]
     G --> K[_create_qwen_llm]
     H --> L[_create_openrouter_llm]
-    
+
     I --> M[init_chat_model<br/>provider=deepseek]
     J --> N[init_chat_model<br/>provider=zhipu]
     K --> O[init_chat_model<br/>provider=qwen]
     L --> P[init_chat_model<br/>provider=openai<br/>base_url=openrouter.ai]
-    
+
     M --> Q[返回 ChatModel 实例]
     N --> Q
     O --> Q
     P --> Q
-    
+
     style A fill:#e1f5ff
     style B fill:#fff4e1
     style C fill:#fff4e1
@@ -2077,15 +2078,18 @@ DOMESTIC_MODELS = {
 为每个提供商实现了对应的创建函数：
 
 **DeepSeek（已存在，保持不变）**：
+
 - 使用 `provider="deepseek"`
 - 环境变量：`DEEPSEEK_API_KEY`
 
-**GLM（智谱AI）**：
-- 使用 `provider="zhipu"`（LangChain 中智谱AI 的 provider 名称）
+**GLM（智谱 AI）**：
+
+- 使用 `provider="zhipu"`（LangChain 中智谱 AI 的 provider 名称）
 - 环境变量：`ZHIPU_API_KEY`（从 `GLM_API_KEY` 配置读取）
 - 支持的模型：`glm-4`, `glm-4-plus`, `glm-4-flash`
 
 **Qwen（通义千问）**：
+
 - 使用 `provider="qwen"`
 - 环境变量：`DASHSCOPE_API_KEY`（从 `QWEN_API_KEY` 配置读取）
 - 模型名称：优先使用 `QWEN_MODEL` 配置，如果未配置则使用传入的 `model` 参数
@@ -2126,10 +2130,12 @@ QWEN_MODEL=qwen-turbo  # 可选，如果未设置则使用 LLM_MODEL 的值
 ### 技术细节
 
 1. **环境变量映射**：
+
    - GLM 使用 `ZHIPU_API_KEY`（LangChain 标准）
    - Qwen 使用 `DASHSCOPE_API_KEY`（DashScope 是阿里云的 API 服务名称）
 
 2. **错误处理**：
+
    - 每个创建函数都会检查对应的 API Key 是否配置
    - 如果未配置会抛出明确的 `ValueError` 异常
 
@@ -2139,7 +2145,7 @@ QWEN_MODEL=qwen-turbo  # 可选，如果未设置则使用 LLM_MODEL 的值
 ### 修改文件清单
 
 - `config.py`: 添加 `GLM_API_KEY`、`QWEN_API_KEY`、`QWEN_MODEL` 配置项
-- `llm/factory.py`: 
+- `llm/factory.py`:
   - 更新 `DOMESTIC_MODELS` 字典，添加 GLM 和 Qwen 模型映射
   - 实现 `_create_glm_llm` 函数
   - 实现 `_create_qwen_llm` 函数
@@ -2149,11 +2155,13 @@ QWEN_MODEL=qwen-turbo  # 可选，如果未设置则使用 LLM_MODEL 的值
 ### 注意事项
 
 1. **依赖安装**：确保安装了对应的 LangChain 集成包：
+
    - `langchain-deepseek`（DeepSeek）
    - `langchain-zhipu`（GLM）
    - `langchain-qwen`（Qwen）
 
 2. **API Key 配置**：需要在 `.env` 文件中配置对应的 API Key：
+
    ```bash
    DEEPSEEK_API_KEY="your_deepseek_key"
    GLM_API_KEY="your_glm_key"
@@ -2169,7 +2177,7 @@ QWEN_MODEL=qwen-turbo  # 可选，如果未设置则使用 LLM_MODEL 的值
 
 ### 需求描述
 
-用户反馈 GLM（智谱AI）和 Qwen（通义千问）都支持 OpenAI 兼容的返回形式，可以直接通过改变 `base_url` 来接入，无需创建自定义包装类。
+用户反馈 GLM（智谱 AI）和 Qwen（通义千问）都支持 OpenAI 兼容的返回形式，可以直接通过改变 `base_url` 来接入，无需创建自定义包装类。
 
 ### 实现逻辑
 
@@ -2181,23 +2189,23 @@ QWEN_MODEL=qwen-turbo  # 可选，如果未设置则使用 LLM_MODEL 的值
 graph TB
     A[业务服务层<br/>findkp/service.py] --> B[LLM 工厂<br/>llm.get_llm]
     B --> C[LLMRouter<br/>路由判断]
-    
+
     C --> D{模型名称匹配}
     D -->|deepseek-chat<br/>deepseek-coder| E[DeepSeek 路径<br/>langchain-deepseek]
     D -->|glm-4<br/>glm-4-plus<br/>glm-4-flash| F[GLM 路径<br/>OpenAI 兼容接口]
     D -->|qwen-turbo<br/>qwen-plus<br/>qwen-max| G[Qwen 路径<br/>OpenAI 兼容接口]
     D -->|gpt-*<br/>claude-*| H[OpenRouter 路径<br/>OpenAI 兼容接口]
-    
+
     E --> I[init_chat_model<br/>provider=deepseek]
     F --> J[init_chat_model<br/>provider=openai<br/>base_url=open.bigmodel.cn]
     G --> K[init_chat_model<br/>provider=openai<br/>base_url=dashscope.aliyuncs.com]
     H --> L[init_chat_model<br/>provider=openai<br/>base_url=openrouter.ai]
-    
+
     I --> M[返回 ChatModel 实例]
     J --> M
     K --> M
     L --> M
-    
+
     style A fill:#e1f5ff
     style B fill:#fff4e1
     style C fill:#fff4e1
@@ -2211,9 +2219,11 @@ graph TB
 #### 2. 代码修改
 
 **删除自定义包装类**：
+
 - 删除了 `llm/custom_providers.py` 文件（不再需要自定义 HTTP 客户端）
 
 **简化 GLM 实现**：
+
 ```python
 def _create_glm_llm(model: str, temperature: float, **kwargs):
     """使用 OpenAI 兼容接口"""
@@ -2228,6 +2238,7 @@ def _create_glm_llm(model: str, temperature: float, **kwargs):
 ```
 
 **简化 Qwen 实现**：
+
 ```python
 def _create_qwen_llm(model: str, temperature: float, **kwargs):
     """使用 OpenAI 兼容接口"""
@@ -2244,12 +2255,14 @@ def _create_qwen_llm(model: str, temperature: float, **kwargs):
 
 #### 3. API 端点配置
 
-**GLM（智谱AI）**：
+**GLM（智谱 AI）**：
+
 - Base URL: `https://open.bigmodel.cn/api/paas/v4`
 - 使用 OpenAI 兼容接口
 - API Key: 从 `GLM_API_KEY` 配置读取
 
 **Qwen（通义千问）**：
+
 - Base URL: `https://dashscope.aliyuncs.com/compatible-mode/v1`
 - 使用 DashScope 兼容模式（OpenAI 兼容）
 - API Key: 从 `QWEN_API_KEY` 配置读取
@@ -2263,7 +2276,7 @@ def _create_qwen_llm(model: str, temperature: float, **kwargs):
 
 ### 修改文件清单
 
-- `llm/factory.py`: 
+- `llm/factory.py`:
   - 简化 `_create_glm_llm` 函数，使用 `init_chat_model` + `base_url`
   - 简化 `_create_qwen_llm` 函数，使用 `init_chat_model` + `base_url`
   - 移除 `custom_providers` 导入
@@ -2277,40 +2290,40 @@ def _create_qwen_llm(model: str, temperature: float, **kwargs):
 
 ---
 
-## 2025-11-05 18:20:00 - 使用智谱AI Python SDK 接入 GLM 模型
+## 2025-11-05 18:20:00 - 使用智谱 AI Python SDK 接入 GLM 模型
 
 ### 需求描述
 
-根据智谱AI官方文档（https://docs.bigmodel.cn/cn/api/introduction#python-sdk），使用 Python SDK（zhipuai）方式接入 GLM 模型，而不是使用 OpenAI 兼容接口。
+根据智谱 AI 官方文档（https://docs.bigmodel.cn/cn/api/introduction#python-sdk），使用 Python SDK（zhipuai）方式接入 GLM 模型，而不是使用 OpenAI 兼容接口。
 
 ### 实现逻辑
 
 #### 1. 架构设计
 
-创建了 GLM SDK 包装类，兼容 LangChain ChatModel 接口，内部使用智谱AI的官方 Python SDK。
+创建了 GLM SDK 包装类，兼容 LangChain ChatModel 接口，内部使用智谱 AI 的官方 Python SDK。
 
 ```mermaid
 graph TB
     A[业务服务层<br/>findkp/service.py] --> B[LLM 工厂<br/>llm.get_llm]
     B --> C[LLMRouter<br/>路由判断]
-    
+
     C --> D{模型名称匹配}
     D -->|deepseek-chat<br/>deepseek-reasoner| E[DeepSeek 路径<br/>langchain-deepseek]
     D -->|glm-4<br/>glm-4-plus<br/>glm-4-flash| F[GLM 路径<br/>Python SDK]
     D -->|qwen-turbo<br/>qwen-plus<br/>qwen-max| G[Qwen 路径<br/>OpenAI 兼容接口]
     D -->|gpt-*<br/>claude-*| H[OpenRouter 路径<br/>OpenAI 兼容接口]
-    
+
     E --> I[init_chat_model<br/>provider=deepseek]
     F --> J[GLMLLMWrapper<br/>zhipuai SDK]
     G --> K[init_chat_model<br/>provider=openai<br/>base_url=dashscope]
     H --> L[init_chat_model<br/>provider=openai<br/>base_url=openrouter]
-    
+
     J --> M[ZhipuAI 客户端<br/>client.chat.completions.create]
     M --> N[返回 ChatModel 实例]
     I --> N
     K --> N
     L --> N
-    
+
     style A fill:#e1f5ff
     style B fill:#fff4e1
     style C fill:#fff4e1
@@ -2328,12 +2341,14 @@ graph TB
 创建了 `llm/glm_wrapper.py`，实现了 `GLMLLMWrapper` 类：
 
 **核心特性**：
+
 - 兼容 LangChain ChatModel 接口（实现 `ainvoke` 和 `invoke` 方法）
 - 内部使用 `zhipuai` SDK 的 `ZhipuAI` 客户端
 - 异步调用使用 `asyncio.to_thread` 在线程池中执行同步 SDK 调用
 - 返回 `AIMessage` 对象，与 LangChain 标准接口一致
 
 **实现细节**：
+
 ```python
 from zhipuai import ZhipuAI
 from langchain_core.messages import AIMessage
@@ -2342,7 +2357,7 @@ class GLMLLMWrapper:
     def __init__(self, model: str, temperature: float = 0.0, api_key: Optional[str] = None, **kwargs):
         self.client = ZhipuAI(api_key=self.api_key)
         # ...
-    
+
     async def ainvoke(self, messages: List[Dict[str, str]], **kwargs) -> AIMessage:
         # 在线程池中执行同步 SDK 调用
         response = await asyncio.to_thread(
@@ -2360,9 +2375,9 @@ class GLMLLMWrapper:
 def _create_glm_llm(model: str, temperature: float, **kwargs):
     """使用智谱AI Python SDK"""
     return GLMLLMWrapper(
-        model=model, 
-        temperature=temperature, 
-        api_key=settings.GLM_API_KEY, 
+        model=model,
+        temperature=temperature,
+        api_key=settings.GLM_API_KEY,
         **kwargs
     )
 ```
@@ -2373,18 +2388,20 @@ def _create_glm_llm(model: str, temperature: float, **kwargs):
 
 ### 优势
 
-1. **官方支持**：使用智谱AI官方 Python SDK，功能更完整，更新更及时
+1. **官方支持**：使用智谱 AI 官方 Python SDK，功能更完整，更新更及时
 2. **更好的类型提示**：SDK 提供完整的类型定义，IDE 支持更好
-3. **功能完整**：SDK 支持所有智谱AI的功能，包括流式响应、异步调用等
+3. **功能完整**：SDK 支持所有智谱 AI 的功能，包括流式响应、异步调用等
 4. **兼容性**：包装类完全兼容 LangChain 接口，业务层代码无需修改
 
 ### 技术细节
 
 1. **异步处理**：
-   - 智谱AI SDK 是同步的，使用 `asyncio.to_thread` 在线程池中执行
+
+   - 智谱 AI SDK 是同步的，使用 `asyncio.to_thread` 在线程池中执行
    - 这样不会阻塞 FastAPI 的事件循环
 
 2. **消息格式转换**：
+
    - LangChain 使用 `[{"role": "user", "content": "..."}]` 格式
    - zhipuai SDK 也使用相同格式，无需转换
 
@@ -2396,7 +2413,7 @@ def _create_glm_llm(model: str, temperature: float, **kwargs):
 
 - `pyproject.toml`: 添加 `zhipuai>=2.0.0` 依赖
 - `llm/glm_wrapper.py`: 新建文件，实现 GLM SDK 包装类
-- `llm/factory.py`: 
+- `llm/factory.py`:
   - 导入 `GLMLLMWrapper`
   - 更新 `_create_glm_llm` 函数以使用 SDK 包装类
 
@@ -2425,7 +2442,7 @@ LLM_MODEL="glm-4"
 
 ### 参考文档
 
-- 智谱AI官方文档：https://docs.bigmodel.cn/cn/api/introduction#python-sdk
+- 智谱 AI 官方文档：https://docs.bigmodel.cn/cn/api/introduction#python-sdk
 
 ---
 
@@ -2436,7 +2453,8 @@ LLM_MODEL="glm-4"
 根据终端日志显示的错误，LLM 返回的 JSON 内容存在解析失败的问题，需要建立完善的容错机制来处理各种异常情况。
 
 **遇到的问题**：
-1. LLM 返回的 JSON 可能被 markdown 代码块包裹（如 ````json ... ````）
+
+1. LLM 返回的 JSON 可能被 markdown 代码块包裹（如 `json ... `）
 2. JSON 格式可能不规范（单引号、尾随逗号等）
 3. LLM 可能返回数组格式而不是对象格式（联系人列表）
 4. JSON 解析失败时没有充分的错误处理和日志记录
@@ -2454,6 +2472,7 @@ ERROR:findkp.service:FindKP 流程失败: 'NoneType' object has no attribute 'ge
 ```
 
 **根本原因**：
+
 - LLM 返回的内容可能不是纯 JSON，可能包含 markdown 代码块、说明文字等
 - JSON 解析失败时返回空字典 `{}`，但后续代码期望特定格式
 - `asyncio.gather` 的异常处理不完整，没有检查 `None` 值
@@ -2475,9 +2494,10 @@ def _extract_json_from_text(self, text: str) -> Optional[str]:
 ```
 
 **策略说明**：
-- **策略1**：优先提取 markdown 代码块（```json ... ``` 或 ``` ... ```）
-- **策略2**：使用括号深度匹配找到完整的 JSON 结构（处理嵌套对象/数组）
-- **策略3**：如果都没找到，尝试直接解析整个文本（可能是纯 JSON）
+
+- **策略 1**：优先提取 markdown 代码块（`json ... ` 或 `...`）
+- **策略 2**：使用括号深度匹配找到完整的 JSON 结构（处理嵌套对象/数组）
+- **策略 3**：如果都没找到，尝试直接解析整个文本（可能是纯 JSON）
 
 **2.2 添加 JSON 修复方法 (`_fix_common_json_issues`)**
 
@@ -2512,6 +2532,7 @@ def _parse_json_with_fallback(
 ```
 
 **容错流程**：
+
 1. 从文本中提取 JSON
 2. 修复常见格式问题
 3. 尝试多种解析方式（原始字符串、移除换行等）
@@ -2533,10 +2554,11 @@ async def extract_with_llm(self, prompt: str) -> Dict:
 ```
 
 **改进点**：
+
 - 检查响应对象和内容是否存在
 - 使用容错解析方法
 - 处理数组格式（自动包装为字典）
-- 详细的错误日志（记录前1000个字符）
+- 详细的错误日志（记录前 1000 个字符）
 
 **2.5 改进 `_search_contacts_parallel` 方法**
 
@@ -2551,6 +2573,7 @@ async def extract_with_llm(self, prompt: str) -> Dict:
 ```
 
 **处理逻辑**：
+
 - 支持字典格式：提取 `contacts` 字段或查找第一个列表字段
 - 支持列表格式：直接使用
 - 验证和过滤：确保每个联系人都是字典格式
@@ -2571,6 +2594,7 @@ elif not isinstance(procurement_result, dict):
 ```
 
 **改进点**：
+
 - 检查 `Exception` 类型
 - 检查 `None` 值
 - 检查类型是否正确
@@ -2620,23 +2644,30 @@ LLM 响应
 建议测试以下场景：
 
 1. **Markdown 代码块包裹**：
-   ```json
+
+   ````json
    ```json
    {"domain": "example.com"}
+   ````
+
    ```
+
    ```
 
 2. **格式不规范**：
+
    ```json
-   {'domain': 'example.com',}  // 单引号 + 尾随逗号
+   { "domain": "example.com" } // 单引号 + 尾随逗号
    ```
 
 3. **数组格式**：
+
    ```json
-   [{"email": "test@example.com"}]
+   [{ "email": "test@example.com" }]
    ```
 
 4. **混合文本**：
+
    ```
    以下是提取的结果：
    {"domain": "example.com"}
@@ -2665,10 +2696,12 @@ LLM 响应
 ### 需求描述
 
 修复 `KPInfo` 模型在验证时出现的错误：
+
 - `email` 字段为空字符串时，Pydantic 要求必须是有效的 EmailStr 格式，导致验证失败
 - `linkedin_url` 和 `twitter_url` 字段为空字符串时，Pydantic 尝试将其解析为 URL，导致验证失败
 
 错误信息：
+
 ```
 3 validation errors for KPInfo
 email: value is not a valid email address: An email address must have an @-sign.
@@ -2681,11 +2714,13 @@ twitter_url: Input should be a valid URL, input is empty
 #### 1. 问题分析
 
 **根本原因**：
+
 1. `KPInfo` 模型中 `email` 字段定义为必填的 `EmailStr`，但实际数据中可能为空字符串
 2. `linkedin_url` 和 `twitter_url` 虽然是 `Optional[HttpUrl]`，但空字符串会被 Pydantic 尝试解析为 URL，导致验证失败
 3. 数据库模型中 `email` 字段是 `nullable=False`，要求 email 不能为空
 
 **解决方案**：
+
 1. 修改 `KPInfo` 模型，将 `email` 改为 `Optional[EmailStr] = None`，允许为空
 2. 在创建 `KPInfo` 实例之前，将空字符串转换为 `None`
 3. 过滤掉没有 email 的联系人（因为数据库要求 email 不能为空）
@@ -2723,8 +2758,8 @@ cleaned_contacts = [clean_contact_data(contact_data) for contact_data in contact
 
 # 过滤掉没有 email 的联系人（数据库要求 email 不能为空）
 valid_contacts = [
-    contact_data 
-    for contact_data in cleaned_contacts 
+    contact_data
+    for contact_data in cleaned_contacts
     if contact_data.get("email")  # 必须有 email
 ]
 ```
@@ -2807,12 +2842,14 @@ async def create_contacts_batch(self, contacts_info: List[KPInfo], company_id: i
 ### 需求描述
 
 优化 `find_kps` 方法，在开始搜索前先检查缓存：
+
 1. 检查 `companies` 表中是否存在已完成的记录
 2. 如果公司已完成且联系人已存在，直接返回现有联系人，跳过搜索
 3. 如果公司已完成但联系人不存在，继续执行搜索流程（可能之前搜索失败）
 4. 只有公司未完成或联系人不存在时才执行完整的搜索流程
 
 **优化目标**：
+
 - 避免重复搜索已完成的公司，节省 API 调用成本
 - 提高响应速度，对于已完成的公司直接返回缓存结果
 - 减少不必要的 LLM 调用和外部 API 请求
@@ -2822,11 +2859,13 @@ async def create_contacts_batch(self, contacts_info: List[KPInfo], company_id: i
 #### 1. 问题分析
 
 **现状**：
+
 - 每次调用 `find_kps` 都会执行完整的搜索流程
 - 即使公司已经完成搜索，仍会重复调用搜索 API 和 LLM
 - 没有利用已有的数据库记录
 
 **优化方案**：
+
 - 在方法开始时检查公司状态
 - 如果公司已完成且联系人已存在，直接返回
 - 如果公司已完成但联系人不存在，继续搜索（可能之前失败）
@@ -2855,14 +2894,14 @@ async def get_company_by_name(self, name: str) -> Optional[models.Company]:
 
 async def find_kps(self, ...):
     repo = Repository(db)
-    
+
     try:
         # 0. 检查缓存：如果公司已完成且联系人已存在，直接返回
         company = await repo.get_company_by_name(company_name_en)
         if company and company.status == CompanyStatus.completed:
             logger.info(f"公司 {company_name_en} 已完成，查询现有联系人...")
             existing_contacts = await repo.get_contacts_by_company(company.id)
-            
+
             if existing_contacts:
                 logger.info(f"找到 {len(existing_contacts)} 个现有联系人，直接返回")
                 # 将 Contact 对象转换为 KPInfo
@@ -2889,7 +2928,7 @@ async def find_kps(self, ...):
                     f"公司 {company_name_en} 已完成，但未找到联系人，继续搜索..."
                 )
                 # 继续执行搜索流程（可能之前搜索失败，但公司状态被标记为完成）
-        
+
         # 1. 生成搜索查询（原有的搜索流程）
         # ...
 ```
@@ -2923,16 +2962,19 @@ find_kps 方法调用
 #### 5. 优化效果
 
 **性能提升**：
+
 - 已完成的公司：响应时间从数秒降至毫秒级（数据库查询）
 - 减少外部 API 调用：避免重复调用 Serper/Google Search API
 - 减少 LLM 调用：避免重复调用 GPT-4o 提取信息
 
 **成本节省**：
+
 - 避免重复的搜索 API 调用（Serper credits）
 - 避免重复的 LLM API 调用（OpenAI tokens）
 - 减少数据库写入操作
 
 **用户体验**：
+
 - 快速返回已完成的公司结果
 - 减少等待时间
 - 提高系统响应速度
@@ -2957,11 +2999,13 @@ find_kps 方法调用
 ### 需求描述
 
 进一步优化 `find_kps` 方法的缓存逻辑：
+
 - 如果公司已完成且联系人已存在 → 直接返回现有联系人
 - 如果公司已完成但联系人不存在 → **仅搜索联系人，跳过公司信息搜索**
 - 如果公司不存在或未完成 → 执行完整流程（公司信息 + 联系人）
 
 **优化目标**：
+
 - 避免重复搜索已完成的公司信息，节省 API 调用成本
 - 提高响应速度，对于已完成的公司直接搜索联系人
 - 减少不必要的 LLM 调用和外部 API 请求
@@ -2971,10 +3015,12 @@ find_kps 方法调用
 #### 1. 问题分析
 
 **之前的实现**：
+
 - 如果公司已完成但联系人不存在，仍会执行完整的搜索流程（包括公司信息搜索）
 - 浪费了 API 调用和 LLM 调用资源
 
 **优化方案**：
+
 - 提取联系人搜索和保存逻辑为独立方法 `_search_and_save_contacts`
 - 如果公司已完成但联系人不存在，直接调用该方法搜索联系人
 - 跳过公司信息搜索步骤（步骤 1-5）
@@ -2998,7 +3044,7 @@ async def _search_and_save_contacts(
 ) -> List[KPInfo]:
     """
     搜索并保存联系人（独立方法，可被复用）
-    
+
     包含：
     1. 并行搜索采购和销售部门 KP
     2. 准备联系人数据
@@ -3015,34 +3061,34 @@ async def _search_and_save_contacts(
 
 async def find_kps(self, ...):
     repo = Repository(db)
-    
+
     try:
         # 0. 检查缓存
         company = await repo.get_company_by_name(company_name_en)
         if company and company.status == CompanyStatus.completed:
             existing_contacts = await repo.get_contacts_by_company(company.id)
-            
+
             if existing_contacts:
                 # 情况 1: 联系人已存在，直接返回
                 return {...}
             else:
                 # 情况 2: 公司已完成但联系人不存在，仅搜索联系人
                 logger.info("公司已完成，但未找到联系人，仅搜索联系人...")
-                
+
                 country_context = self._get_country_context(country)
                 company.status = CompanyStatus.processing
                 await db.commit()
-                
+
                 # 直接搜索并保存联系人（跳过公司信息搜索）
                 all_contacts = await self._search_and_save_contacts(
                     company, company_name_en, company_name_local,
                     country, country_context, db, repo
                 )
-                
+
                 company.status = CompanyStatus.completed
                 await db.commit()
                 return {...}
-        
+
         # 情况 3: 公司不存在或未完成，执行完整流程
         # 1. 生成搜索查询（公司信息）
         # 2. 执行搜索和 LLM 提取
@@ -3091,6 +3137,7 @@ find_kps 方法调用
 #### 5. 优化效果对比
 
 **之前（公司已完成但联系人不存在）**：
+
 ```
 1. 生成公司搜索查询
 2. 执行公司搜索 API 调用
@@ -3100,19 +3147,21 @@ find_kps 方法调用
 ```
 
 **现在（公司已完成但联系人不存在）**：
+
 ```
 1. 搜索联系人（直接）
 2. 保存联系人
 ```
 
 **节省的成本**：
+
 - 减少公司信息搜索 API 调用（Serper/Google Search）
 - 减少 LLM 调用（GPT-4o 提取公司信息）
 - 减少响应时间（跳过公司信息搜索步骤）
 
 ### 修改的文件
 
-- `findkp/service.py`: 
+- `findkp/service.py`:
   - 添加 `_search_and_save_contacts()` 方法（提取联系人搜索和保存逻辑）
   - 优化 `find_kps()` 方法的缓存检查逻辑
   - 添加 `Company` 导入
@@ -3143,14 +3192,17 @@ find_kps 方法调用
 创建了新的 `findkp/email_search_strategy.py` 文件，实现了 `EmailSearchStrategy` 类：
 
 - **阶段 1（A1-A3）**：官网邮箱搜索
+
   - A1: `site:DOMAIN "@"+DOMAIN` - 官网邮箱直搜
   - A2: `site:DOMAIN (inurl:contact OR inurl:contact-us OR inurl:about) "@"+DOMAIN` - 联系页聚焦
   - A3: `site:DOMAIN filetype:pdf "@"+DOMAIN` - 文件类邮箱搜索
 
 - **阶段 2（B1）**：岗位/职能聚焦
+
   - B1: `site:DOMAIN ("sales" OR "business development" OR "procurement" OR "purchasing" OR "buyer") "@"+DOMAIN`
 
 - **阶段 3（B2）**：通用联系方式补充
+
   - B2: `site:DOMAIN ("email" OR "contact" OR "reach us" OR "get in touch") "@"+DOMAIN`
 
 - **阶段 4（C1-C2）**：LinkedIn 搜索
@@ -3162,6 +3214,7 @@ find_kps 方法调用
 修改了 `_search_with_multiple_providers` 方法：
 
 - **优先使用 Serper**：检查 `SERPER_API_KEY` 配置，如果存在则尝试使用
+
   - 如果 Serper 返回有效结果，直接返回
   - 如果 Serper 失败或返回空结果，则切换到 Google
 
@@ -3187,7 +3240,7 @@ find_kps 方法调用
 ### 修改的文件
 
 - `findkp/email_search_strategy.py`: 新建文件，实现邮箱搜索策略生成器
-- `findkp/service.py`: 
+- `findkp/service.py`:
   - 添加 `EmailSearchStrategy` 导入和初始化
   - 修改 `_search_with_multiple_providers()` 方法：从并行改为选择逻辑
   - 修改 `_search_contacts_parallel()` 方法：添加 domain 参数并集成新策略
@@ -3240,11 +3293,13 @@ _search_contacts_parallel (修改)
 ### 问题分析
 
 根据日志分析，问题出现在：
+
 - LLM 调用成功（HTTP 200 OK）
 - 但 JSON 解析失败，无法提取联系人信息
 - 导致返回 0 个联系人
 
 根本原因：
+
 - 手动解析 JSON 容易失败
 - LLM 返回格式可能不规范
 - 需要复杂的容错逻辑
@@ -3256,10 +3311,12 @@ _search_contacts_parallel (修改)
 添加了三个 Pydantic 模型用于结构化输出：
 
 - **ContactInfo**: 单个联系人信息（用于 LLM 结构化输出）
+
   - 字段：full_name, email, role, linkedin_url, twitter_url, confidence_score
   - 注意：email 使用 str 而不是 EmailStr，因为 LLM 可能返回无效邮箱
 
 - **ContactsResponse**: 联系人列表响应
+
   - 字段：contacts: List[ContactInfo]
 
 - **CompanyInfoResponse**: 公司信息响应
@@ -3269,12 +3326,13 @@ _search_contacts_parallel (修改)
 
 创建了两个新方法使用 LangChain 的 `with_structured_output`：
 
-- **extract_contacts_with_llm()**: 
+- **extract_contacts_with_llm()**:
+
   - 使用 `self.llm.with_structured_output(ContactsResponse)`
   - 直接返回 Pydantic 模型实例，无需 JSON 解析
   - 如果失败，降级到旧的 JSON 解析方法
 
-- **extract_company_info_with_llm()**: 
+- **extract_company_info_with_llm()**:
   - 使用 `self.llm.with_structured_output(CompanyInfoResponse)`
   - 同样支持降级机制
 
@@ -3298,10 +3356,11 @@ _search_contacts_parallel (修改)
 
 ### 修改的文件
 
-- `schemas/contact.py`: 
+- `schemas/contact.py`:
+
   - 添加 `ContactInfo`, `ContactsResponse`, `CompanyInfoResponse` 模型
 
-- `findkp/service.py`: 
+- `findkp/service.py`:
   - 添加 `extract_contacts_with_llm()` 方法
   - 添加 `extract_company_info_with_llm()` 方法
   - 修改 `_search_contacts_parallel()` 使用新方法
@@ -3311,11 +3370,13 @@ _search_contacts_parallel (修改)
 ### 架构改进
 
 **之前**:
+
 ```
 LLM 调用 → 返回文本 → 手动解析 JSON → 容错处理 → 提取数据
 ```
 
 **现在**:
+
 ```
 LLM 调用（结构化输出） → 直接返回 Pydantic 模型 → 转换为字典
 ```
@@ -3355,18 +3416,20 @@ LLM 调用（结构化输出） → 直接返回 Pydantic 模型 → 转换为�
 
 在 `pyproject.toml` 中添加 `loguru>=0.7.0` 依赖。
 
-#### 2. 创建日志配置模块（logs/__init__.py）
+#### 2. 创建日志配置模块（logs/**init**.py）
 
 创建了统一的日志配置模块，包含：
 
 - **日志目录结构**：
+
   - `logs/` - 主日志目录
   - `logs/llm/requests/` - LLM 请求日志目录
   - `logs/llm/responses/` - LLM 响应日志目录
 
 - **日志配置**：
+
   - 控制台输出：彩色格式，INFO 级别
-  - 文件输出：`logs/app_{date}.log`，DEBUG 级别，每日轮转，保留30天，自动压缩
+  - 文件输出：`logs/app_{date}.log`，DEBUG 级别，每日轮转，保留 30 天，自动压缩
 
 - **LLM 日志函数**：
   - `log_llm_request()`: 记录 LLM 请求到独立文件，文件名包含时间戳（精确到微秒）
@@ -3376,6 +3439,7 @@ LLM 调用（结构化输出） → 直接返回 Pydantic 模型 → 转换为�
 #### 3. 替换所有 logging 为 loguru
 
 替换了以下文件中的 logging：
+
 - `findkp/service.py`
 - `findkp/router.py`
 - `findkp/search_strategy.py`
@@ -3391,6 +3455,7 @@ LLM 调用（结构化输出） → 直接返回 Pydantic 模型 → 转换为�
 在以下方法中添加了请求和响应日志：
 
 - **findkp/service.py**:
+
   - `extract_contacts_with_llm()`: 记录联系人提取的请求和响应
   - `extract_company_info_with_llm()`: 记录公司信息提取的请求和响应
   - `extract_with_llm()`: 记录通用提取的请求和响应（包括错误情况）
@@ -3415,9 +3480,7 @@ LLM 调用（结构化输出） → 直接返回 Pydantic 模型 → 转换为�
 {
   "timestamp": "2024-11-06T12:34:56.789012",
   "model": "deepseek-chat",
-  "messages": [
-    {"role": "user", "content": "..."}
-  ],
+  "messages": [{ "role": "user", "content": "..." }],
   "task_type": "extract_contacts",
   "temperature": 0.0
 }
@@ -3454,7 +3517,7 @@ LLM 调用（结构化输出） → 直接返回 Pydantic 模型 → 转换为�
 3. **时间戳精确**: 使用微秒级时间戳，确保文件名唯一
 4. **关联追踪**: 响应日志包含请求日志路径，便于关联查看
 5. **任务类型标识**: 通过 `task_type` 字段区分不同类型的 LLM 调用
-6. **自动轮转**: 应用日志自动按天轮转，保留30天
+6. **自动轮转**: 应用日志自动按天轮转，保留 30 天
 
 ### 目录结构
 
@@ -3473,7 +3536,7 @@ logs/
 
 ### 使用示例
 
-```python
+````python
 from logs import logger, log_llm_request, log_llm_response
 
 # 记录请求
@@ -3548,7 +3611,7 @@ request_log_path = log_llm_request(
 使用正则表达式提取邮箱（与 `core/analysis.py` 保持一致）：
 ```python
 EMAIL_REGEX = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-```
+````
 
 #### 公共邮箱过滤规则
 
@@ -3613,11 +3676,13 @@ graph TD
 #### 1. 替换 core/search 模块的日志
 
 **1.1 修改 `core/search/serper_provider.py`**
+
 - 移除 `import logging`
 - 移除 `logger = logging.getLogger(__name__)`
 - 添加 `from logs import logger`
 
 **1.2 修改 `core/search/google_provider.py`**
+
 - 移除 `import logging`
 - 移除 `logger = logging.getLogger(__name__)`
 - 添加 `from logs import logger`
@@ -3625,6 +3690,7 @@ graph TD
 #### 2. 配置 httpx 日志级别
 
 **2.1 修改 `logs/__init__.py`**
+
 - 添加 `import logging`
 - 在日志配置初始化时添加：`logging.getLogger("httpx").setLevel(logging.WARNING)`
 - 这样可以抑制 httpx 的 INFO 级别日志（如 "HTTP Request: POST ..."），只记录 WARNING 和 ERROR 级别的日志
@@ -3632,6 +3698,7 @@ graph TD
 #### 3. 确保配置生效
 
 **3.1 修改 `main.py`**
+
 - 在应用启动时显式导入 `logs` 模块：`import logs  # noqa: F401`
 - 确保日志配置（包括 httpx 日志级别设置）在应用启动早期就生效
 
@@ -3653,5 +3720,89 @@ graph TD
 1. **httpx 日志配置**：通过 `logging.getLogger("httpx").setLevel(logging.WARNING)` 将 httpx 的日志级别设置为 WARNING，只记录警告和错误信息
 2. **日志统一性**：现在所有模块都使用 `from logs import logger`，确保日志格式和行为一致
 3. **向后兼容**：`main.py` 中保留了基本的 `logging.basicConfig()` 配置，用于向后兼容，但实际应用中推荐使用 loguru
+
+---
+
+## 2025-11-06 14:00:00 - 修复数据库事务冲突：Serper API 响应记录时的嵌套 commit 问题
+
+### 需求描述
+
+在运行 FindKP 搜索时，出现数据库事务冲突错误：
+
+```
+Method 'commit()' can't be called here; method 'commit()' is already in progress
+```
+
+错误发生在 `core/search/serper_provider.py` 的 `search_batch` 方法中，当尝试记录 Serper API 响应数据到数据库时。
+
+### 问题分析
+
+**根本原因**：
+
+1. FastAPI 的 `get_db()` 依赖项会在请求结束时自动 `commit()`（在 `database/connection.py` 第 36 行）
+2. `serper_provider.search_batch()` 在记录数据时，Repository 方法内部也调用了 `commit()`（如 `create_serper_response()` 第 192 行）
+3. 这导致了嵌套事务冲突：在一个已经开启的事务中再次调用 `commit()`
+
+**问题场景**：
+
+- 请求开始 → `get_db()` 创建数据库会话
+- 调用 `find_kps()` → 传递会话给 `search_batch()`
+- `search_batch()` 记录数据 → Repository 方法调用 `commit()`
+- 请求结束 → `get_db()` 再次调用 `commit()` → ❌ 冲突
+
+### 实现逻辑
+
+#### 1. 修改 Repository 方法，添加 auto_commit 参数
+
+**1.1 修改 `database/repository.py` 的 `create_serper_response()` 方法**
+
+- 添加 `auto_commit: bool = True` 参数
+- 当 `auto_commit=False` 时，只调用 `flush()` 而不调用 `commit()`
+- 保持向后兼容，默认值 `True` 不影响其他调用
+
+**1.2 修改 `database/repository.py` 的 `create_serper_organic_results()` 方法**
+
+- 添加 `auto_commit: bool = True` 参数
+- 当 `auto_commit=False` 时，只调用 `flush()` 而不调用 `commit()`
+- 保持向后兼容，默认值 `True` 不影响其他调用
+
+#### 2. 修改 serper_provider，传入 auto_commit=False
+
+**2.1 修改 `core/search/serper_provider.py` 的 `search_batch()` 方法**
+
+- 在调用 `repository.create_serper_response()` 时传入 `auto_commit=False`
+- 在调用 `repository.create_serper_organic_results()` 时传入 `auto_commit=False`
+- 这样只 flush 数据到会话，不提交事务，由外部的 `get_db()` 统一提交
+
+### 技术细节
+
+#### flush() vs commit()
+
+- **flush()**: 将更改发送到数据库，但不会提交事务。在同一次会话中，其他操作可以看到这些更改。
+- **commit()**: 提交事务，永久保存更改。之后会开始新的事务。
+
+在这个场景中：
+
+- 使用 `flush()` 可以让数据在会话中可见，但不会提交事务
+- 外部的 `get_db()` 依赖项会在请求结束时统一提交所有更改
+- 避免了嵌套事务冲突
+
+### 修改文件清单
+
+1. ✅ `database/repository.py` - 添加 `auto_commit` 参数到 `create_serper_response()` 和 `create_serper_organic_results()`
+2. ✅ `core/search/serper_provider.py` - 调用时传入 `auto_commit=False`
+
+### 功能验证
+
+- ✅ Repository 方法支持 auto_commit 参数
+- ✅ serper_provider 调用时传入 auto_commit=False
+- ✅ 代码通过 lint 检查
+- ✅ 保持向后兼容，其他调用不受影响
+
+### 注意事项
+
+1. **事务管理**：使用 `flush()` 而不是 `commit()`，让外部的依赖项统一管理事务提交
+2. **向后兼容**：`auto_commit` 参数默认为 `True`，保持现有的行为不变
+3. **错误处理**：记录数据失败不影响主流程，错误会被捕获并记录日志
 
 ---

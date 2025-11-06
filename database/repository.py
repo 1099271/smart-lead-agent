@@ -41,7 +41,7 @@ class Repository:
     ) -> models.Contact:
         """
         创建一个新的联系人记录 - FindKP 板块（异步版本）
-        
+
         注意：email 可以为空，允许存储没有邮箱的联系人
         """
         contact = models.Contact(
@@ -76,7 +76,7 @@ class Repository:
 
         Returns:
             创建的联系人列表
-            
+
         注意：email 可以为空，允许存储没有邮箱的联系人
         """
         contacts = []
@@ -162,7 +162,7 @@ class Repository:
         return company
 
     async def create_serper_response(
-        self, trace_id: str, response_data: Dict[str, Any]
+        self, trace_id: str, response_data: Dict[str, Any], auto_commit: bool = True
     ) -> models.SerperResponse:
         """
         创建 Serper API 响应记录（异步版本）
@@ -170,6 +170,7 @@ class Repository:
         Args:
             trace_id: UUID traceid
             response_data: API 响应数据，包含 searchParameters 和 credits
+            auto_commit: 是否自动提交，默认 True。如果为 False，只 flush，不 commit
 
         Returns:
             创建的 SerperResponse 实例
@@ -189,12 +190,18 @@ class Repository:
             credits=response_data.get("credits"),
         )
         self.db.add(response)
-        await self.db.commit()
-        await self.db.refresh(response)
+        if auto_commit:
+            await self.db.commit()
+            await self.db.refresh(response)
+        else:
+            await self.db.flush()  # 只 flush，不 commit
         return response
 
     async def create_serper_organic_results(
-        self, trace_id: str, organic_results: List[Dict[str, Any]]
+        self,
+        trace_id: str,
+        organic_results: List[Dict[str, Any]],
+        auto_commit: bool = True,
     ) -> List[models.SerperOrganicResult]:
         """
         批量创建 Serper API 搜索结果记录（异步版本）
@@ -202,6 +209,7 @@ class Repository:
         Args:
             trace_id: UUID traceid
             organic_results: organic 数组中的结果列表
+            auto_commit: 是否自动提交，默认 True。如果为 False，只 flush，不 commit
 
         Returns:
             创建的 SerperOrganicResult 列表
@@ -220,10 +228,12 @@ class Repository:
             results.append(result)
 
         # 批量提交
-        await self.db.commit()
-
-        # 刷新所有对象
-        for result in results:
-            await self.db.refresh(result)
+        if auto_commit:
+            await self.db.commit()
+            # 刷新所有对象
+            for result in results:
+                await self.db.refresh(result)
+        else:
+            await self.db.flush()  # 只 flush，不 commit
 
         return results

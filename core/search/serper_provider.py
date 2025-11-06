@@ -162,28 +162,30 @@ class SerperSearchProvider(BaseSearchProvider):
 
                                 # 记录响应参数
                                 await repository.create_serper_response(
-                                    current_trace_id, query_result
+                                    current_trace_id, query_result, auto_commit=False
                                 )
 
                                 # 记录搜索结果
                                 organic_results = query_result.get("organic", [])
                                 if organic_results:
                                     await repository.create_serper_organic_results(
-                                        current_trace_id, organic_results
+                                        current_trace_id,
+                                        organic_results,
+                                        auto_commit=False,
                                     )
                         else:
                             # 单个查询返回对象，包含 searchParameters、organic、credits 等字段
                             # 格式：{"searchParameters": {...}, "organic": [...], "credits": 1}
                             # 记录响应参数
                             await repository.create_serper_response(
-                                trace_id, response_data
+                                trace_id, response_data, auto_commit=False
                             )
 
                             # 记录搜索结果
                             organic_results = response_data.get("organic", [])
                             if organic_results:
                                 await repository.create_serper_organic_results(
-                                    trace_id, organic_results
+                                    trace_id, organic_results, auto_commit=False
                                 )
                     except Exception as e:
                         # 记录失败不影响主流程
