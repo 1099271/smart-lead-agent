@@ -3806,3 +3806,131 @@ Method 'commit()' can't be called here; method 'commit()' is already in progress
 3. **错误处理**：记录数据失败不影响主流程，错误会被捕获并记录日志
 
 ---
+
+## 2025-11-06 20:00:54 - 完善贸易数据导入脚本
+
+### 需求描述
+
+完善 `scripts/make_t_json.py` 脚本，实现以下功能：
+
+1. 查询 `/home/www/downloads-tendata` 目录下的所有 `.json` 格式文件
+2. 解析每个文件的 `results.content` 节点数据
+3. 将数据遍历存储到独立的贸易数据表中
+4. 根据节点内容设计数据库表结构
+5. 支持增量导入（记录已处理的文件，跳过已处理）
+
+### 实现逻辑
+
+#### 1. 数据库表设计
+
+根据 JSON 数据结构，设计了两个表：
+
+**贸易记录表 (`trade_records`)**：
+- 存储所有贸易记录数据
+- 包含进口商、出口商、产品、贸易方式等完整信息
+- 字段映射：驼峰命名（JSON）→ 下划线命名（数据库）
+- 支持 JSON 类型字段存储产品标签数组
+- 添加了多个索引以优化查询性能
+
+**已处理文件记录表 (`processed_files`)**：
+- 记录已处理的文件信息
+- 包含文件路径、大小、处理时间、导入记录数
+- 使用唯一索引防止重复处理
+
+#### 2. ORM 模型定义
+
+在 `database/models.py` 中添加了两个模型：
+
+- `TradeRecord`: 贸易记录模型，包含所有贸易相关字段
+- `ProcessedFile`: 已处理文件记录模型
+
+#### 3. Repository 扩展
+
+在 `database/repository.py` 中添加了三个方法：
+
+- `create_trade_records_batch()`: 批量创建贸易记录
+  - 支持日期字符串解析（ISO 格式）
+  - 自动映射 JSON 字段名到数据库字段名
+  - 支持批量提交优化性能
+  
+- `get_processed_file()`: 查询已处理文件记录
+  - 用于检查文件是否已处理
+  
+- `create_processed_file()`: 创建已处理文件记录
+  - 记录文件处理信息
+
+#### 4. 导入脚本实现
+
+完善了 `scripts/make_t_json.py`，实现以下功能：
+
+**核心功能**：
+- 扫描指定目录下的所有 `.json` 文件
+- 解析 JSON 文件，提取 `results.content` 数组
+- 批量导入数据到数据库
+- 记录已处理文件，支持增量导入
+
+**特性**：
+- 异步处理：使用 `AsyncSession` 和 `async/await`
+- 错误处理：单个文件失败不影响其他文件
+- 日志记录：详细的处理进度和错误信息
+- 命令行参数：支持指定目录和强制重新导入
+
+**使用方式**：
+```bash
+# 使用默认目录
+uv run python scripts/make_t_json.py
+
+# 指定目录
+uv run python scripts/make_t_json.py --dir /path/to/json/files
+
+# 强制重新导入所有文件
+uv run python scripts/make_t_json.py --force
+```
+
+### 数据流程
+
+```
+JSON 文件
+  ↓
+扫描目录 (.json 文件)
+  ↓
+检查是否已处理 (processed_files 表)
+  ↓ (未处理)
+解析 JSON (results.content)
+  ↓
+批量插入 (trade_records 表)
+  ↓
+记录已处理 (processed_files 表)
+```
+
+### 修改文件清单
+
+1. ✅ `database/sql/004_trade_records.sql` - 创建贸易记录表结构
+2. ✅ `database/sql/005_processed_files.sql` - 创建已处理文件记录表结构
+3. ✅ `database/models.py` - 添加 TradeRecord 和 ProcessedFile 模型
+4. ✅ `database/repository.py` - 添加批量插入和文件记录方法
+5. ✅ `scripts/make_t_json.py` - 完善导入脚本
+
+### 技术要点
+
+1. **字段映射**：JSON 使用驼峰命名，数据库使用下划线命名，在 Repository 中手动映射
+2. **日期处理**：支持 ISO 格式日期字符串解析（包含时区信息）
+3. **批量操作**：使用批量提交优化性能，减少数据库交互次数
+4. **增量导入**：通过 `processed_files` 表记录已处理文件，避免重复导入
+5. **错误容错**：单个文件失败不影响整体流程，记录详细错误日志
+
+### 注意事项
+
+1. **数据库初始化**：需要先执行 SQL 脚本创建表结构
+   ```bash
+   mysql -u user -p database < database/sql/004_trade_records.sql
+   mysql -u user -p database < database/sql/005_processed_files.sql
+   ```
+
+2. **数据去重**：根据需求，允许重复记录（trade_id 不设唯一约束）
+
+3. **性能优化**：批量插入时使用 `auto_commit=True`，每批数据提交一次事务
+
+4. **脚本执行**：使用 `uv run` 执行脚本，确保使用正确的 Python 环境和依赖
+
+---
