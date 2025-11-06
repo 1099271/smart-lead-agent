@@ -21,6 +21,9 @@ from logs import logger, log_llm_request, log_llm_response
 class FindKPService:
     """FindKP 服务类,负责搜索和提取公司 KP 信息（异步版本）"""
 
+    # 邮箱正则表达式（复用 core/analysis.py 中的）
+    EMAIL_REGEX = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+
     def __init__(self):
         # 使用统一的 LLM 工厂函数（自动路由到 OpenRouter 或直接调用）
         self.llm = get_llm()
@@ -210,6 +213,118 @@ class FindKPService:
         logger.error(f"JSON 解析失败，已尝试多种方法")
         logger.debug(f"最终尝试的内容: {json_str[:500]}")
         return None
+
+    def _extract_emails_from_snippets(self, results: List[Dict[str, Any]]) -> List[str]:
+        """
+        从搜索结果中提取所有邮箱（使用正则表达式）
+
+        Args:
+            results: 搜索结果列表，每个元素包含 snippet 字段
+
+        Returns:
+            提取到的邮箱列表（去重后）
+        """
+        emails = set()
+        for result in results:
+            snippet = result.get("snippet", "")
+            if snippet:
+                found_emails = re.findall(self.EMAIL_REGEX, snippet)
+                emails.update(found_emails)
+
+        return list(emails)
+
+    def _filter_public_emails(
+        self, emails: List[str], domain: Optional[str] = None
+    ) -> List[str]:
+        """
+        过滤公共邮箱（排除个人邮箱）
+
+        Args:
+            emails: 邮箱列表
+            domain: 公司域名（可选，用于过滤非公司域名邮箱）
+
+        Returns:
+            过滤后的公共邮箱列表
+        """
+        # 通用邮箱关键词（这些通常是公共邮箱）
+        public_keywords = [
+            "contact",
+            "info",
+            "sales",
+            "support",
+            "service",
+            "hello",
+            "hi",
+            "inquiry",
+            "enquiry",
+            "general",
+            "help",
+            "customerservice",
+            "customer-service",
+            "marketing",
+            "business",
+            "office",
+            "admin",
+            "cus-info",
+            "customercare",
+            "customer-care",
+        ]
+
+        filtered = []
+        for email in emails:
+            email_lower = email.lower()
+
+            # 如果指定了域名，只保留该域名的邮箱
+            if domain:
+                email_domain = email.split("@")[-1] if "@" in email else ""
+                if email_domain.lower() != domain.lower():
+                    continue
+
+            # 检查是否包含公共邮箱关键词
+            local_part = email.split("@")[0].lower() if "@" in email else ""
+            if any(keyword in local_part for keyword in public_keywords):
+                filtered.append(email)
+
+        return filtered
+
+    async def _extract_and_save_public_emails(
+        self,
+        company: Company,
+        results: List[Dict[str, Any]],
+        db: AsyncSession,
+        repo: Repository,
+    ) -> None:
+        """
+        从搜索结果中提取公共邮箱并保存到公司记录
+
+        Args:
+            company: 公司对象
+            results: 搜索结果列表
+            db: 数据库会话
+            repo: Repository 实例
+        """
+        # 1. 从 snippets 中提取所有邮箱
+        all_emails = self._extract_emails_from_snippets(results)
+
+        if not all_emails:
+            logger.debug(f"未在搜索结果中找到邮箱: {company.name}")
+            return
+
+        # 2. 过滤公共邮箱（只保留看起来是公共邮箱的）
+        public_emails = self._filter_public_emails(all_emails, domain=company.domain)
+
+        if not public_emails:
+            logger.debug(f"未找到公共邮箱: {company.name}")
+            return
+
+        # 3. 更新公司记录
+        try:
+            await repo.update_company_public_emails(company.id, public_emails)
+            logger.info(
+                f"成功保存 {len(public_emails)} 个公共邮箱到公司 {company.name}: {public_emails}"
+            )
+        except Exception as e:
+            logger.error(f"保存公共邮箱失败: {e}", exc_info=True)
 
     async def extract_contacts_with_llm(self, prompt: str) -> Dict:
         """
@@ -681,6 +796,12 @@ class FindKPService:
         await db.refresh(company)
         logger.info(f"公司记录已创建/更新: {company.name}")
 
+        # 7. 从搜索结果中提取并保存公共邮箱
+        if company_results:
+            await self._extract_and_save_public_emails(
+                company, company_results, db, repo
+            )
+
         return company
 
     async def _search_and_save_contacts(
@@ -770,7 +891,12 @@ class FindKPService:
         if not isinstance(sales_contacts, list):
             sales_contacts = []
 
-        # 2. 准备联系人数据
+        # 2. 提取并保存公共邮箱
+        all_results = procurement_results + sales_results
+        if all_results:
+            await self._extract_and_save_public_emails(company, all_results, db, repo)
+
+        # 3. 准备联系人数据
         contacts_to_save = []
 
         for contact_data in procurement_contacts:
@@ -813,19 +939,15 @@ class FindKPService:
             clean_contact_data(contact_data) for contact_data in contacts_to_save
         ]
 
-        # 过滤掉没有 email 的联系人（数据库要求 email 不能为空）
-        valid_contacts = [
-            contact_data
-            for contact_data in cleaned_contacts
-            if contact_data.get("email")  # 必须有 email
-        ]
+        # 确保 email 字段统一处理：空字符串转换为 None
+        for contact_data in cleaned_contacts:
+            if not contact_data.get("email"):
+                contact_data["email"] = None
 
-        if len(cleaned_contacts) > len(valid_contacts):
-            logger.warning(
-                f"过滤掉 {len(cleaned_contacts) - len(valid_contacts)} 个没有 email 的联系人"
-            )
+        # 4. 保存所有联系人（不再过滤没有 email 的联系人）
+        valid_contacts = cleaned_contacts  # 保留所有有效联系人，即使没有 email
 
-        # 4. 批量保存联系人
+        # 5. 批量保存联系人
         all_contacts = []
         if valid_contacts:
             logger.info(f"批量保存 {len(valid_contacts)} 个联系人...")

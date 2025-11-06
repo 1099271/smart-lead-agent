@@ -1,15 +1,13 @@
 """Google Custom Search API 提供者"""
 
 import httpx
-import logging
 import asyncio
 from typing import List, Dict, Any, Optional
 from urllib.parse import urlencode
 from core.search.base import BaseSearchProvider
 from core.schemas import SearchResult
 from config import settings
-
-logger = logging.getLogger(__name__)
+from logs import logger
 
 
 class GoogleSearchProvider(BaseSearchProvider):

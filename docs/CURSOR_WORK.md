@@ -3483,23 +3483,175 @@ request_log_path = log_llm_request(
     task_type="extract_contacts",
 )
 
-# 调用 LLM
-response = await llm.ainvoke(messages)
+---
 
-# 记录响应
-log_llm_response(
-    response_content=response.content,
-    request_log_path=request_log_path,
-    model="deepseek-chat",
-    task_type="extract_contacts",
-)
+## 2025-11-06 13:36:18 - 从搜索结果中提取公共邮箱并允许联系人无邮箱存储
+
+### 需求描述
+
+1. **问题发现**：在 Serper 返回的 snippet 中包含了邮箱（如 `cus-info@phuanh.vn`），但这些邮箱没有被存储下来
+2. **需求1**：这些公共邮箱需要被存储到 Company 表中，作为公司的公共联系方式
+3. **需求2**：联系人即使没有邮件也可以被存储下来，不是必须有邮件才行
+4. **补充说明**：在查询公司信息时，如果返回的信息中带有公共邮箱，要同步存储
+
+### 实现逻辑
+
+#### 1. 数据库层面修改
+
+**1.1 创建数据库迁移脚本** (`database/sql/004_add_public_emails_and_nullable_email.sql`)
+- 添加 `public_emails` 字段到 `companies` 表（JSON 格式）
+- 修改 `contacts` 表的 `email` 字段为可空（`nullable=True`）
+
+**1.2 修改数据库模型** (`database/models.py`)
+- 导入 `JSON` 类型
+- `Company` 模型添加 `public_emails = Column(JSON)` 字段
+- `Contact` 模型修改 `email` 字段：`nullable=True`
+
+#### 2. Repository 层修改 (`database/repository.py`)
+
+**2.1 移除 email 必填检查**
+- `create_contact()`: 移除 email 必填验证，允许 email 为 None
+- `create_contacts_batch()`: 移除 email 必填验证，允许没有 email 的联系人
+
+**2.2 添加公共邮箱更新方法**
+- `update_company_public_emails()`: 更新公司的公共邮箱列表，自动合并和去重
+
+#### 3. Service 层修改 (`findkp/service.py`)
+
+**3.1 添加邮箱提取工具函数**
+- `EMAIL_REGEX`: 邮箱正则表达式常量（复用 `core/analysis.py` 中的）
+- `_extract_emails_from_snippets()`: 从搜索结果 snippet 中提取所有邮箱（使用正则表达式）
+- `_filter_public_emails()`: 过滤公共邮箱，排除个人邮箱
+  - 支持根据域名过滤
+  - 根据公共邮箱关键词过滤（如 contact, info, sales, cus-info 等）
+
+**3.2 添加公共邮箱保存方法**
+- `_extract_and_save_public_emails()`: 从搜索结果中提取公共邮箱并保存到公司记录
+  - 提取所有邮箱
+  - 过滤公共邮箱
+  - 调用 Repository 更新公司记录
+
+**3.3 在公司信息提取时提取公共邮箱**
+- 修改 `_search_and_save_company_info()`: 在保存公司信息后，调用 `_extract_and_save_public_emails()` 提取并保存公共邮箱
+
+**3.4 在联系人搜索时提取公共邮箱**
+- 修改 `_search_and_save_contacts()`: 在获取搜索结果后，调用 `_extract_and_save_public_emails()` 提取并保存公共邮箱
+
+**3.5 移除联系人过滤逻辑**
+- 修改 `_search_and_save_contacts()`: 移除过滤没有 email 的联系人的逻辑
+- 允许所有有效联系人被保存，即使没有 email
+
+### 技术细节
+
+#### 邮箱提取方式
+
+使用正则表达式提取邮箱（与 `core/analysis.py` 保持一致）：
+```python
+EMAIL_REGEX = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
 ```
 
-### 验证结果
+#### 公共邮箱过滤规则
 
-- ✅ logs 模块导入成功
-- ✅ 语法检查通过
-- ✅ 所有文件已替换 logging 为 loguru
-- ✅ LLM 调用处已添加日志记录
+1. **域名过滤**：如果指定了公司域名，只保留该域名的邮箱
+2. **关键词过滤**：保留包含公共邮箱关键词的邮箱，如：
+   - contact, info, sales, support, service
+   - hello, hi, inquiry, enquiry
+   - customerservice, customer-service, customercare
+   - cus-info（用户示例中的邮箱前缀）
+
+#### 数据流程
+
+```mermaid
+graph TD
+    A[搜索公司/联系人] --> B[获取搜索结果 snippets]
+    B --> C[正则表达式提取所有邮箱]
+    C --> D[过滤公共邮箱]
+    D --> E{是否有公共邮箱?}
+    E -->|是| F[更新 Company.public_emails]
+    E -->|否| G[跳过]
+    B --> H[LLM 提取联系人]
+    H --> I{联系人有邮箱?}
+    I -->|是| J[保存联系人 email]
+    I -->|否| K[保存联系人 email=None]
+    J --> L[保存到数据库]
+    K --> L
+```
+
+### 修改文件清单
+
+1. ✅ `database/sql/004_add_public_emails_and_nullable_email.sql` - 数据库迁移脚本（新建）
+2. ✅ `database/models.py` - 添加 `public_emails` 字段，修改 `email` 为可空
+3. ✅ `database/repository.py` - 移除 email 必填检查，添加更新公共邮箱方法
+4. ✅ `findkp/service.py` - 添加邮箱提取工具函数，修改保存逻辑
+
+### 功能验证
+
+- ✅ 数据库模型修改完成
+- ✅ Repository 层允许 email 为空
+- ✅ Service 层提取公共邮箱功能实现
+- ✅ 在公司信息提取时自动提取公共邮箱
+- ✅ 在联系人搜索时自动提取公共邮箱
+- ✅ 允许没有 email 的联系人存储
+- ✅ 代码通过 lint 检查
+
+### 注意事项
+
+1. **数据库迁移**：需要执行迁移脚本 `004_add_public_emails_and_nullable_email.sql` 更新数据库结构
+2. **邮箱提取**：使用正则表达式提取，可能会提取到一些误匹配的邮箱，但通过公共邮箱关键词过滤可以减少误报
+3. **向后兼容**：允许 email 为空不影响现有功能，现有有 email 的联系人继续正常工作
+
+---
+
+## 2025-11-06 13:45:00 - 修复日志模块：将 core/search 中的 logging 替换为 loguru
+
+### 需求描述
+
+发现 `core/search/serper_provider.py` 和 `core/search/google_provider.py` 中仍在使用标准的 `logging` 模块，而不是项目统一的 `loguru`。另外，httpx 库输出的 INFO 级别日志（如 "HTTP Request: POST https://google.serper.dev/search"）也需要被抑制。
+
+### 实现逻辑
+
+#### 1. 替换 core/search 模块的日志
+
+**1.1 修改 `core/search/serper_provider.py`**
+- 移除 `import logging`
+- 移除 `logger = logging.getLogger(__name__)`
+- 添加 `from logs import logger`
+
+**1.2 修改 `core/search/google_provider.py`**
+- 移除 `import logging`
+- 移除 `logger = logging.getLogger(__name__)`
+- 添加 `from logs import logger`
+
+#### 2. 配置 httpx 日志级别
+
+**2.1 修改 `logs/__init__.py`**
+- 添加 `import logging`
+- 在日志配置初始化时添加：`logging.getLogger("httpx").setLevel(logging.WARNING)`
+- 这样可以抑制 httpx 的 INFO 级别日志（如 "HTTP Request: POST ..."），只记录 WARNING 和 ERROR 级别的日志
+
+#### 3. 确保配置生效
+
+**3.1 修改 `main.py`**
+- 在应用启动时显式导入 `logs` 模块：`import logs  # noqa: F401`
+- 确保日志配置（包括 httpx 日志级别设置）在应用启动早期就生效
+
+### 修改文件清单
+
+1. ✅ `core/search/serper_provider.py` - 替换 logging 为 loguru
+2. ✅ `core/search/google_provider.py` - 替换 logging 为 loguru
+3. ✅ `logs/__init__.py` - 添加 httpx 日志级别配置
+4. ✅ `main.py` - 显式导入 logs 模块
+
+### 功能验证
+
+- ✅ 所有 search provider 使用统一的 loguru logger
+- ✅ httpx 的 INFO 级别日志被抑制
+- ✅ 代码通过 lint 检查
+
+### 注意事项
+
+1. **httpx 日志配置**：通过 `logging.getLogger("httpx").setLevel(logging.WARNING)` 将 httpx 的日志级别设置为 WARNING，只记录警告和错误信息
+2. **日志统一性**：现在所有模块都使用 `from logs import logger`，确保日志格式和行为一致
+3. **向后兼容**：`main.py` 中保留了基本的 `logging.basicConfig()` 配置，用于向后兼容，但实际应用中推荐使用 loguru
 
 ---

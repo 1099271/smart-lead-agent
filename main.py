@@ -2,7 +2,11 @@ import logging
 from fastapi import FastAPI
 from findkp.router import router as findkp_router
 
-# 设置日志
+# 导入 logs 模块以初始化日志配置（包括 httpx 日志级别设置）
+import logs  # noqa: F401
+
+# 设置日志（为了向后兼容，保留基本的 logging 配置）
+# 但实际应用中推荐使用 loguru（通过 logs 模块）
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",

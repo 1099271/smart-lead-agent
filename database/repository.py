@@ -41,15 +41,13 @@ class Repository:
     ) -> models.Contact:
         """
         创建一个新的联系人记录 - FindKP 板块（异步版本）
+        
+        注意：email 可以为空，允许存储没有邮箱的联系人
         """
-        # 防御性检查：email 不能为空（数据库要求）
-        if not contact_info.email:
-            raise ValueError(f"联系人 email 不能为空: {contact_info.full_name}")
-
         contact = models.Contact(
             company_id=company_id,
             full_name=contact_info.full_name,
-            email=contact_info.email,
+            email=contact_info.email,  # 可以为 None
             role=contact_info.role,
             department=contact_info.department,
             linkedin_url=(
@@ -78,17 +76,15 @@ class Repository:
 
         Returns:
             创建的联系人列表
+            
+        注意：email 可以为空，允许存储没有邮箱的联系人
         """
         contacts = []
         for contact_info in contacts_info:
-            # 防御性检查：email 不能为空（数据库要求）
-            if not contact_info.email:
-                continue  # 跳过没有 email 的联系人
-
             contact = models.Contact(
                 company_id=company_id,
                 full_name=contact_info.full_name,
-                email=contact_info.email,
+                email=contact_info.email,  # 可以为 None
                 role=contact_info.role,
                 department=contact_info.department,
                 linkedin_url=(
@@ -131,6 +127,39 @@ class Repository:
             select(models.Contact).filter(models.Contact.email == email)
         )
         return result.scalar_one_or_none()
+
+    async def update_company_public_emails(
+        self, company_id: int, public_emails: List[str]
+    ) -> models.Company:
+        """
+        更新公司的公共邮箱列表
+
+        Args:
+            company_id: 公司ID
+            public_emails: 公共邮箱列表（去重后的）
+
+        Returns:
+            更新后的 Company 对象
+        """
+        result = await self.db.execute(
+            select(models.Company).filter(models.Company.id == company_id)
+        )
+        company = result.scalar_one_or_none()
+        if not company:
+            raise ValueError(f"公司不存在: {company_id}")
+
+        # 合并现有邮箱和新邮箱，去重
+        existing_emails = company.public_emails or []
+        if not isinstance(existing_emails, list):
+            existing_emails = []
+
+        # 合并并去重
+        all_emails = list(set(existing_emails + public_emails))
+        company.public_emails = all_emails
+
+        await self.db.commit()
+        await self.db.refresh(company)
+        return company
 
     async def create_serper_response(
         self, trace_id: str, response_data: Dict[str, Any]

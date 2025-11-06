@@ -2,14 +2,12 @@
 
 import uuid
 import httpx
-import logging
 from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.search.base import BaseSearchProvider
 from core.schemas import SearchResult
 from config import settings
-
-logger = logging.getLogger(__name__)
+from logs import logger
 
 
 class SerperSearchProvider(BaseSearchProvider):

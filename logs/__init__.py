@@ -5,6 +5,7 @@
 """
 
 import sys
+import logging
 from pathlib import Path
 from datetime import datetime
 from loguru import logger
@@ -18,6 +19,11 @@ LOGS_DIR = ROOT_DIR / "logs"
 LOGS_DIR.mkdir(exist_ok=True)
 (LOGS_DIR / "llm" / "requests").mkdir(parents=True, exist_ok=True)
 (LOGS_DIR / "llm" / "responses").mkdir(parents=True, exist_ok=True)
+
+# 配置第三方库的日志级别（减少噪音）
+# httpx 是一个 HTTP 客户端库，默认会在 INFO 级别记录请求日志
+# 我们将其设置为 WARNING 级别，只记录重要的警告和错误
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # 移除默认的 handler
 logger.remove()

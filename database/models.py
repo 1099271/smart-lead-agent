@@ -8,6 +8,7 @@ from sqlalchemy import (
     ForeignKey,
     TIMESTAMP,
     DECIMAL,
+    JSON,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -33,6 +34,7 @@ class Company(Base):
     industry = Column(String(100))  # 行业
     positioning = Column(Text)  # 公司定位描述
     brief = Column(Text)  # 公司简要介绍/简报
+    public_emails = Column(JSON)  # 公共邮箱列表（JSON数组格式）
     status = Column(Enum(CompanyStatus), default=CompanyStatus.pending)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(
@@ -52,7 +54,7 @@ class Contact(Base):
     id = Column(Integer, primary_key=True, index=True)
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
     full_name = Column(String(255))
-    email = Column(String(255), nullable=False, index=True)  # 允许重复
+    email = Column(String(255), nullable=True, index=True)  # 邮箱(允许为空)
     role = Column(String(255))
     department = Column(String(100), index=True)  # 采购/销售
     linkedin_url = Column(String(512))
