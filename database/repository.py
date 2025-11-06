@@ -13,19 +13,34 @@ class Repository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_or_create_company(self, name: str) -> models.Company:
+    async def get_or_create_company(
+        self, name: str, local_name: Optional[str] = None
+    ) -> models.Company:
         """
         根据公司名称获取公司,如果不存在则创建（异步版本）
+
+        Args:
+            name: 公司英文名称
+            local_name: 公司本地名称（可选）
+
+        Returns:
+            Company 对象
         """
         result = await self.db.execute(
             select(models.Company).filter(models.Company.name == name)
         )
         company = result.scalar_one_or_none()
         if not company:
-            company = models.Company(name=name)
+            company = models.Company(name=name, local_name=local_name)
             self.db.add(company)
             await self.db.commit()
             await self.db.refresh(company)
+        else:
+            # 如果公司已存在，但 local_name 为空且传入了 local_name，则更新
+            if not company.local_name and local_name:
+                company.local_name = local_name
+                await self.db.commit()
+                await self.db.refresh(company)
         return company
 
     async def get_company_by_name(self, name: str) -> Optional[models.Company]:

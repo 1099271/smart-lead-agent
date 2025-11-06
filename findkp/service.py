@@ -758,7 +758,9 @@ class FindKPService:
         Returns:
             Company 对象（已创建或更新的公司记录）
         """
-        company = await repo.get_or_create_company(company_name_en)
+        company = await repo.get_or_create_company(
+            company_name_en, local_name=company_name_local
+        )
         country_context = self._get_country_context(country)
 
         # 定义查询顺序：优先本地名，回退英文名
@@ -1185,7 +1187,9 @@ class FindKPService:
             logger.error(f"FindKP 流程失败: {e}", exc_info=True)
             # 更新公司状态为失败
             try:
-                company = await repo.get_or_create_company(company_name_en)
+                company = await repo.get_or_create_company(
+                    company_name_en, local_name=company_name_local
+                )
                 company.status = CompanyStatus.failed
                 await db.commit()
             except Exception:

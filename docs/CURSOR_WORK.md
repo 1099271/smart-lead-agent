@@ -3934,3 +3934,116 @@ JSON 文件
 4. **脚本执行**：使用 `uv run` 执行脚本，确保使用正确的 Python 环境和依赖
 
 ---
+
+## 2025-11-06 21:12:26 - 在存储 Company 时添加 local_name 字段
+
+### 需求描述
+
+在存储 Company 的时候，需要把 local 的名字也存储到表格中。当前系统中有 `company_name_local` 参数，但在存储 Company 时没有保存到数据库。
+
+### 实现逻辑
+
+#### 1. 问题分析
+
+- Company 模型目前只有 `name` 字段，存储的是英文名称（`company_name_en`）
+- 系统中有 `company_name_local` 参数，但在存储 Company 时没有保存
+- `get_or_create_company` 方法只接收 `name` 参数，没有接收 `local_name`
+
+#### 2. 实现步骤
+
+**步骤 1：在 Company 模型中添加 `local_name` 字段**
+
+```python
+# database/models.py
+class Company(Base):
+    name = Column(String(255), unique=True, nullable=False, index=True)
+    local_name = Column(String(255))  # 公司本地名称
+    domain = Column(String(255))  # 公司域名
+    # ...
+```
+
+**步骤 2：修改 `get_or_create_company` 方法**
+
+- 添加 `local_name` 参数（可选）
+- 创建 Company 时保存 `local_name`
+- 如果公司已存在但 `local_name` 为空，则更新它
+
+```python
+async def get_or_create_company(
+    self, name: str, local_name: Optional[str] = None
+) -> models.Company:
+    # 创建时保存 local_name
+    if not company:
+        company = models.Company(name=name, local_name=local_name)
+    # 如果已存在但 local_name 为空，则更新
+    elif not company.local_name and local_name:
+        company.local_name = local_name
+        await self.db.commit()
+```
+
+**步骤 3：更新调用处**
+
+- 在 `_search_and_save_company_info` 方法中传入 `local_name`
+- 在异常处理中也传入 `local_name`
+
+```python
+company = await repo.get_or_create_company(
+    company_name_en, local_name=company_name_local
+)
+```
+
+**步骤 4：创建数据库迁移脚本**
+
+创建 `database/sql/006_add_company_local_name.sql`：
+
+```sql
+ALTER TABLE companies 
+ADD COLUMN local_name VARCHAR(255) COMMENT '公司本地名称' AFTER name;
+```
+
+#### 3. 数据流程
+
+```
+API 请求 (company_name_en, company_name_local)
+  ↓
+FindKPService.find_kps()
+  ↓
+_search_and_save_company_info()
+  ↓
+Repository.get_or_create_company(name, local_name)
+  ↓
+创建/更新 Company 记录 (name + local_name)
+```
+
+#### 4. 设计考虑
+
+1. **向后兼容**：`local_name` 参数设为可选，不影响现有代码
+2. **数据更新**：如果公司已存在但 `local_name` 为空，自动更新
+3. **字段位置**：`local_name` 字段放在 `name` 字段之后，保持逻辑顺序
+
+### 修改文件清单
+
+1. ✅ `database/models.py` - 在 Company 模型中添加 `local_name` 字段
+2. ✅ `database/repository.py` - 修改 `get_or_create_company` 方法，接收并保存 `local_name`
+3. ✅ `findkp/service.py` - 更新两处调用，传入 `local_name` 参数
+4. ✅ `database/sql/006_add_company_local_name.sql` - 创建数据库迁移脚本
+
+### 技术要点
+
+1. **可选参数**：`local_name` 设为可选参数，保持向后兼容
+2. **自动更新**：如果公司已存在但 `local_name` 为空，自动更新
+3. **字段类型**：使用 `VARCHAR(255)` 存储本地名称，与 `name` 字段一致
+4. **数据库迁移**：需要执行迁移脚本添加字段
+
+### 注意事项
+
+1. **数据库迁移**：需要先执行 SQL 脚本添加字段
+   ```bash
+   mysql -u user -p database < database/sql/006_add_company_local_name.sql
+   ```
+
+2. **现有数据**：已存在的 Company 记录的 `local_name` 字段为 NULL，不影响查询
+
+3. **数据完整性**：`local_name` 字段允许为空，因为某些公司可能没有本地名称
+
+---

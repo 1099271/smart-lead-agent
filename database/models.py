@@ -33,6 +33,7 @@ class Company(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), unique=True, nullable=False, index=True)
+    local_name = Column(String(255))  # 公司本地名称
     domain = Column(String(255))  # 公司域名
     industry = Column(String(100))  # 行业
     positioning = Column(Text)  # 公司定位描述
