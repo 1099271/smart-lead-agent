@@ -2,22 +2,20 @@
 
 import json
 import re
-import logging
 import asyncio
 from typing import List, Dict, Optional, Any, Union
 from sqlalchemy.ext.asyncio import AsyncSession
 from llm import get_llm
 from database.repository import Repository
 from database.models import CompanyStatus, Company
-from schemas.contact import KPInfo
+from schemas.contact import KPInfo, ContactsResponse, CompanyInfoResponse
 from core.search import SerperSearchProvider, GoogleSearchProvider
 from .prompts import EXTRACT_COMPANY_INFO_PROMPT, EXTRACT_CONTACTS_PROMPT
 from .search_strategy import SearchStrategy
+from .email_search_strategy import EmailSearchStrategy
 from .result_aggregator import ResultAggregator
-
-# 设置日志
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from config import settings
+from logs import logger, log_llm_request, log_llm_response
 
 
 class FindKPService:
@@ -31,6 +29,7 @@ class FindKPService:
         self.google_provider = GoogleSearchProvider()
         # 初始化搜索策略和结果聚合器
         self.search_strategy = SearchStrategy()
+        self.email_search_strategy = EmailSearchStrategy()
         self.result_aggregator = ResultAggregator()
 
     def _extract_json_from_text(self, text: str) -> Optional[str]:
@@ -212,6 +211,144 @@ class FindKPService:
         logger.debug(f"最终尝试的内容: {json_str[:500]}")
         return None
 
+    async def extract_contacts_with_llm(self, prompt: str) -> Dict:
+        """
+        使用 LLM 提取联系人信息（结构化输出版本）
+
+        使用 LangChain 的 with_structured_output 确保返回结构化数据，
+        避免 JSON 解析失败的问题。
+
+        Args:
+            prompt: 提示词
+
+        Returns:
+            包含 contacts 列表的字典格式
+        """
+        try:
+            # 记录 LLM 请求
+            messages = [{"role": "user", "content": prompt}]
+            model_name = (
+                getattr(self.llm, "model_name", None)
+                or getattr(self.llm, "model", None)
+                or "unknown"
+            )
+            request_log_path = log_llm_request(
+                messages=messages,
+                model=model_name,
+                task_type="extract_contacts",
+            )
+
+            # 使用结构化输出，直接返回 Pydantic 模型
+            structured_llm = self.llm.with_structured_output(ContactsResponse)
+            result = await structured_llm.ainvoke(messages)
+
+            # 记录 LLM 响应
+            if hasattr(result, "model_dump"):
+                response_content = str(result.model_dump())
+            elif hasattr(result, "contacts"):
+                response_content = f"Extracted {len(result.contacts)} contacts"
+            else:
+                response_content = str(result)
+
+            log_llm_response(
+                response_content=response_content,
+                request_log_path=request_log_path,
+                model=model_name,
+                task_type="extract_contacts",
+            )
+
+            # result 已经是 ContactsResponse 实例，直接转换
+            if isinstance(result, ContactsResponse):
+                # 转换为字典格式，保持向后兼容
+                contacts_dict = []
+                for contact in result.contacts:
+                    contact_dict = contact.model_dump(exclude_none=True)
+                    # 确保所有字段都存在
+                    contacts_dict.append(
+                        {
+                            "full_name": contact_dict.get("full_name"),
+                            "email": contact_dict.get("email"),
+                            "role": contact_dict.get("role"),
+                            "linkedin_url": contact_dict.get("linkedin_url"),
+                            "twitter_url": contact_dict.get("twitter_url"),
+                            "confidence_score": contact_dict.get(
+                                "confidence_score", 0.0
+                            ),
+                        }
+                    )
+
+                logger.info(f"使用结构化输出成功提取 {len(contacts_dict)} 个联系人")
+                return {"contacts": contacts_dict}
+            else:
+                logger.warning(f"LLM 返回了意外的类型: {type(result)}")
+                return {"contacts": []}
+
+        except Exception as e:
+            logger.error(f"LLM 结构化输出提取联系人失败: {e}", exc_info=True)
+            # 降级到旧的 JSON 解析方法
+            logger.info("降级到旧的 JSON 解析方法")
+            return await self.extract_with_llm(prompt)
+
+    async def extract_company_info_with_llm(self, prompt: str) -> Dict:
+        """
+        使用 LLM 提取公司信息（结构化输出版本）
+
+        使用 LangChain 的 with_structured_output 确保返回结构化数据，
+        避免 JSON 解析失败的问题。
+
+        Args:
+            prompt: 提示词
+
+        Returns:
+            包含 domain, industry, positioning, brief 的字典格式
+        """
+        try:
+            # 记录 LLM 请求
+            messages = [{"role": "user", "content": prompt}]
+            model_name = (
+                getattr(self.llm, "model_name", None)
+                or getattr(self.llm, "model", None)
+                or "unknown"
+            )
+            request_log_path = log_llm_request(
+                messages=messages,
+                model=model_name,
+                task_type="extract_company_info",
+            )
+
+            # 使用结构化输出，直接返回 Pydantic 模型
+            structured_llm = self.llm.with_structured_output(CompanyInfoResponse)
+            result = await structured_llm.ainvoke(messages)
+
+            # 记录 LLM 响应
+            if hasattr(result, "model_dump"):
+                response_content = str(result.model_dump())
+            else:
+                response_content = str(result)
+
+            log_llm_response(
+                response_content=response_content,
+                request_log_path=request_log_path,
+                model=model_name,
+                task_type="extract_company_info",
+            )
+
+            # result 已经是 CompanyInfoResponse 实例，直接转换
+            if isinstance(result, CompanyInfoResponse):
+                # 转换为字典格式，保持向后兼容
+                company_dict = result.model_dump(exclude_none=True)
+                logger.info("使用结构化输出成功提取公司信息")
+                return company_dict
+            else:
+                logger.warning(f"LLM 返回了意外的类型: {type(result)}")
+                return {}
+
+        except Exception as e:
+            logger.error(f"LLM 结构化输出提取公司信息失败: {e}", exc_info=True)
+            # 降级到旧的 JSON 解析方法
+            logger.info("降级到旧的 JSON 解析方法")
+            return await self.extract_with_llm(prompt)
+
     async def extract_with_llm(self, prompt: str) -> Dict:
         """
         使用 LLM 提取结构化信息（异步版本）
@@ -229,19 +366,52 @@ class FindKPService:
             提取的结构化数据（字典格式）
         """
         try:
+            # 记录 LLM 请求
+            messages = [{"role": "user", "content": prompt}]
+            model_name = (
+                getattr(self.llm, "model_name", None)
+                or getattr(self.llm, "model", None)
+                or "unknown"
+            )
+            request_log_path = log_llm_request(
+                messages=messages,
+                model=model_name,
+                task_type="extract_with_llm",
+            )
+
             # 使用 LangChain V1 的异步调用方式
-            response = await self.llm.ainvoke([{"role": "user", "content": prompt}])
+            response = await self.llm.ainvoke(messages)
 
             # 检查响应是否有效
             if not response:
                 logger.error("LLM 返回无效响应: response 为空")
+                log_llm_response(
+                    response_content="[ERROR] Empty response",
+                    request_log_path=request_log_path,
+                    model=model_name,
+                    task_type="extract_with_llm",
+                )
                 return {}
 
             if not hasattr(response, "content"):
                 logger.error("LLM 返回无效响应: response 缺少 content 属性")
+                log_llm_response(
+                    response_content="[ERROR] Missing content attribute",
+                    request_log_path=request_log_path,
+                    model=model_name,
+                    task_type="extract_with_llm",
+                )
                 return {}
 
             content = response.content
+
+            # 记录 LLM 响应
+            log_llm_response(
+                response_content=content,
+                request_log_path=request_log_path,
+                model=model_name,
+                task_type="extract_with_llm",
+            )
 
             # 检查内容是否为空
             if not content or not content.strip():
@@ -289,7 +459,7 @@ class FindKPService:
         self, queries: List[Dict[str, Any]], db: Optional[AsyncSession] = None
     ) -> Dict[str, List]:
         """
-        使用多个搜索工具并行搜索
+        使用选择的搜索工具搜索（优先 Serper，失败则 Google）
 
         Args:
             queries: 查询参数字典列表
@@ -298,58 +468,76 @@ class FindKPService:
         Returns:
             查询到搜索结果的映射
         """
-        # 并行执行多个搜索工具的批量搜索
-        try:
-            serper_task = self.serper_provider.search_batch(queries, db=db)
-            google_task = self.google_provider.search_batch(queries)
+        # 优先尝试 Serper（结构化数据返回、搜索质量高）
+        if settings.SERPER_API_KEY:
+            try:
+                logger.debug("使用 Serper 进行搜索")
+                serper_results = await self.serper_provider.search_batch(queries, db=db)
 
-            serper_results, google_results = await asyncio.gather(
-                serper_task, google_task, return_exceptions=True
-            )
+                # 检查结果是否有效（至少有一些结果）
+                if isinstance(serper_results, dict) and serper_results:
+                    # 检查是否有任何查询返回了结果
+                    has_results = any(
+                        results and len(results) > 0
+                        for results in serper_results.values()
+                    )
+                    if has_results:
+                        logger.info(
+                            f"Serper 搜索成功，返回 {len(serper_results)} 个查询结果"
+                        )
+                        return serper_results
+                    else:
+                        logger.warning("Serper 返回空结果，切换到 Google")
+                else:
+                    logger.warning("Serper 返回无效结果，切换到 Google")
+            except Exception as e:
+                logger.warning(f"Serper 搜索失败: {e}，切换到 Google")
+        else:
+            logger.debug("Serper API Key 未配置，使用 Google")
 
-            # 处理异常情况
-            if isinstance(serper_results, Exception):
-                logger.warning(f"Serper 搜索失败: {serper_results}")
-                serper_results = {}
-            if isinstance(google_results, Exception):
-                logger.warning(f"Google 搜索失败: {google_results}")
-                google_results = {}
+        # 回退到 Google（官方 API，参数更多样化）
+        if settings.GOOGLE_SEARCH_API_KEY and settings.GOOGLE_SEARCH_CX:
+            try:
+                logger.debug("使用 Google 进行搜索")
+                google_results = await self.google_provider.search_batch(queries)
 
-            # 合并结果
-            merged_results = {}
-            all_query_keys = set(serper_results.keys()) | set(google_results.keys())
+                if isinstance(google_results, dict) and google_results:
+                    logger.info(
+                        f"Google 搜索成功，返回 {len(google_results)} 个查询结果"
+                    )
+                    return google_results
+                else:
+                    logger.warning("Google 返回空结果")
+            except Exception as e:
+                logger.error(f"Google 搜索失败: {e}", exc_info=True)
+        else:
+            logger.warning("Google Search API Key 或 CX 未配置")
 
-            for query_key in all_query_keys:
-                serper_result = serper_results.get(query_key, [])
-                google_result = google_results.get(query_key, [])
-                # 合并两个工具的结果
-                merged_results[query_key] = serper_result + google_result
-
-            return merged_results
-
-        except Exception as e:
-            logger.error(f"并行搜索失败: {e}", exc_info=True)
-            # 返回空结果
-            return {query.get("q", "query"): [] for query in queries}
+        # 如果两者都失败，返回空结果
+        logger.error("所有搜索提供商都失败，返回空结果")
+        return {query.get("q", "query"): [] for query in queries}
 
     async def _search_contacts_parallel(
         self,
         company_name_en: str,
         company_name_local: str,
+        domain: Optional[str],
         country: Optional[str],
         department: str,
         country_context: str,
         db: Optional[AsyncSession] = None,
     ) -> Dict[str, List]:
         """
-        并行搜索联系人（采购或销售）
+        搜索联系人（采购或销售），支持邮箱搜索策略
 
         Args:
             company_name_en: 公司英文名称
             company_name_local: 公司本地名称
+            domain: 公司域名（可选）
             country: 国家名称（可选）
             department: 部门名称（"采购" 或 "销售"）
             country_context: 国家上下文字符串
+            db: 可选的数据库会话
 
         Returns:
             包含 contacts 和 results 的字典
@@ -358,14 +546,26 @@ class FindKPService:
             logger.info(
                 f"搜索{department}部门 KP: {company_name_en}"
                 + (f" ({country})" if country else "")
+                + (f" [域名: {domain}]" if domain else "")
             )
 
-            # 生成查询
-            queries = self.search_strategy.generate_contact_queries(
-                company_name_en, company_name_local, country, department
-            )
+            # 如果 domain 存在，使用邮箱搜索策略（阶段1-4）
+            if domain:
+                logger.info(f"使用邮箱搜索策略（域名: {domain}）")
+                queries = self.email_search_strategy.generate_email_search_queries(
+                    domain=domain,
+                    company_name_en=company_name_en,
+                    department=department,
+                    country=country,
+                )
+            else:
+                # 回退到原有的联系人搜索策略
+                logger.info("使用原有联系人搜索策略（无域名）")
+                queries = self.search_strategy.generate_contact_queries(
+                    company_name_en, company_name_local, country, department
+                )
 
-            # 并行执行多工具搜索
+            # 使用选择的搜索工具搜索（优先 Serper，失败则 Google）
             results_map = await self._search_with_multiple_providers(queries, db=db)
 
             # 聚合结果
@@ -377,8 +577,8 @@ class FindKPService:
                 for r in aggregated_results
             ]
 
-            # LLM 提取联系人
-            contacts_result = await self.extract_with_llm(
+            # LLM 提取联系人（使用结构化输出）
+            contacts_result = await self.extract_contacts_with_llm(
                 EXTRACT_CONTACTS_PROMPT.format(
                     department=department,
                     country_context=country_context,
@@ -387,30 +587,8 @@ class FindKPService:
             )
 
             # 处理 LLM 返回的联系人数据
-            # 可能的情况：
-            # 1. 返回字典 {"contacts": [...]}
-            # 2. 返回列表 [...]（直接返回数组）
-            # 3. 返回空字典 {}
-            contacts = []
-            if isinstance(contacts_result, dict):
-                # 如果返回的是字典，尝试提取 contacts 字段
-                contacts = contacts_result.get("contacts", [])
-                # 如果 contacts 字段不存在，检查是否有其他可能的字段
-                if not contacts:
-                    # 尝试查找包含列表的字段
-                    for key, value in contacts_result.items():
-                        if isinstance(value, list):
-                            contacts = value
-                            logger.info(f"从字典的 '{key}' 字段提取到联系人列表")
-                            break
-            elif isinstance(contacts_result, list):
-                # 如果直接返回列表，直接使用
-                contacts = contacts_result
-            else:
-                logger.warning(
-                    f"LLM 返回的联系人数据格式不正确: {type(contacts_result)}"
-                )
-                contacts = []
+            # 结构化输出保证返回格式为 {"contacts": [...]}
+            contacts = contacts_result.get("contacts", [])
 
             # 确保 contacts 是列表，且每个元素都是字典
             if not isinstance(contacts, list):
@@ -483,9 +661,9 @@ class FindKPService:
             for r in aggregated_company_results
         ]
 
-        # 5. LLM 提取公司信息
+        # 5. LLM 提取公司信息（使用结构化输出）
         country_context = self._get_country_context(country)
-        company_info = await self.extract_with_llm(
+        company_info = await self.extract_company_info_with_llm(
             EXTRACT_COMPANY_INFO_PROMPT.format(
                 country_context=country_context,
                 search_results=json.dumps(company_results, ensure_ascii=False),
@@ -540,6 +718,7 @@ class FindKPService:
         procurement_task = self._search_contacts_parallel(
             company_name_en,
             company_name_local,
+            company.domain,
             country,
             "采购",
             country_context,
@@ -548,6 +727,7 @@ class FindKPService:
         sales_task = self._search_contacts_parallel(
             company_name_en,
             company_name_local,
+            company.domain,
             country,
             "销售",
             country_context,

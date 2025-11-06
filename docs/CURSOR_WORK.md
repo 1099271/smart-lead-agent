@@ -3126,3 +3126,380 @@ find_kps 方法调用
 - **代码复用**：DRY 原则（Don't Repeat Yourself）
 
 ---
+
+## 2024-11-06: 邮箱搜索策略重构
+
+### 需求
+
+根据 `search_stategy.md` 中的策略调整联系人搜索逻辑：
+
+1. 实现基于域名的邮箱搜索策略（A1-A3, B1-B2, C1-C2）
+2. 将 Serper 和 Google 从并行改为选择逻辑（优先 Serper，失败则 Google）
+
+### 实现逻辑
+
+#### 1. 创建邮箱搜索策略模块
+
+创建了新的 `findkp/email_search_strategy.py` 文件，实现了 `EmailSearchStrategy` 类：
+
+- **阶段 1（A1-A3）**：官网邮箱搜索
+  - A1: `site:DOMAIN "@"+DOMAIN` - 官网邮箱直搜
+  - A2: `site:DOMAIN (inurl:contact OR inurl:contact-us OR inurl:about) "@"+DOMAIN` - 联系页聚焦
+  - A3: `site:DOMAIN filetype:pdf "@"+DOMAIN` - 文件类邮箱搜索
+
+- **阶段 2（B1）**：岗位/职能聚焦
+  - B1: `site:DOMAIN ("sales" OR "business development" OR "procurement" OR "purchasing" OR "buyer") "@"+DOMAIN`
+
+- **阶段 3（B2）**：通用联系方式补充
+  - B2: `site:DOMAIN ("email" OR "contact" OR "reach us" OR "get in touch") "@"+DOMAIN`
+
+- **阶段 4（C1-C2）**：LinkedIn 搜索
+  - C1: `site:linkedin.com "COMPANY_FULL" ("procurement" OR "purchasing" OR "buyer")`
+  - C2: `site:linkedin.com "COMPANY_FULL" ("sales" OR "business development")`
+
+#### 2. 修改搜索提供商选择逻辑
+
+修改了 `_search_with_multiple_providers` 方法：
+
+- **优先使用 Serper**：检查 `SERPER_API_KEY` 配置，如果存在则尝试使用
+  - 如果 Serper 返回有效结果，直接返回
+  - 如果 Serper 失败或返回空结果，则切换到 Google
+
+- **回退到 Google**：检查 `GOOGLE_SEARCH_API_KEY` 和 `GOOGLE_SEARCH_CX` 配置
+  - 如果 Google 也失败，返回空结果并记录错误
+
+#### 3. 集成邮箱搜索策略到联系人搜索
+
+修改了 `_search_contacts_parallel` 方法：
+
+- 添加 `domain: Optional[str]` 参数
+- 如果 `domain` 存在，使用 `EmailSearchStrategy.generate_email_search_queries()` 生成邮箱搜索查询
+- 如果 `domain` 不存在，回退到原有的 `SearchStrategy.generate_contact_queries()` 方法
+- 保持向后兼容，不影响现有功能
+
+#### 4. 更新调用方传递域名
+
+修改了 `_search_and_save_contacts` 方法：
+
+- 在调用 `_search_contacts_parallel` 时传递 `company.domain` 参数
+- 确保域名信息正确传递到搜索逻辑
+
+### 修改的文件
+
+- `findkp/email_search_strategy.py`: 新建文件，实现邮箱搜索策略生成器
+- `findkp/service.py`: 
+  - 添加 `EmailSearchStrategy` 导入和初始化
+  - 修改 `_search_with_multiple_providers()` 方法：从并行改为选择逻辑
+  - 修改 `_search_contacts_parallel()` 方法：添加 domain 参数并集成新策略
+  - 修改 `_search_and_save_contacts()` 方法：传递 company.domain
+
+### 架构设计
+
+```
+EmailSearchStrategy (新建)
+    ↓
+Generate Email Queries (A1-A3, B1-B2, C1-C2)
+    ↓
+_search_with_multiple_providers (修改)
+    ├─ 优先 Serper (检查配置和结果有效性)
+    └─ 回退 Google (如果 Serper 失败)
+    ↓
+_search_contacts_parallel (修改)
+    ├─ 有 domain → 使用 EmailSearchStrategy
+    └─ 无 domain → 使用 SearchStrategy (向后兼容)
+```
+
+### 相关技术点
+
+- **模块化设计**：将邮箱搜索策略独立为单独模块，符合单一职责原则
+- **选择逻辑**：从并行改为选择，减少不必要的 API 调用
+- **向后兼容**：保持原有功能不受影响，domain 为空时自动回退
+- **错误处理**：完善的异常处理和日志记录
+- **配置管理**：通过 `settings` 检查 API Key 配置
+
+### 测试验证
+
+- ✅ 语法检查通过（uv run python -m py_compile）
+- ✅ EmailSearchStrategy 导入和初始化成功
+- ✅ 查询生成功能正常（测试生成了 6 个查询）
+
+### 注意事项
+
+- D1/D2 策略（邮箱验证与生成）不在本次实现范围内，后续发送邮件时处理
+- 多语言关键词支持暂时不考虑，后续可扩展
+- 策略执行顺序按照文档推荐顺序：A1 → A2 → A3 → B1 → B2 → C1 → C2
+
+---
+
+## 2024-11-06: 集成 LangChain 结构化输出解决 JSON 解析问题
+
+### 需求
+
+解决 LLM 返回 JSON 解析失败的问题，使用 LangChain 的结构化输出功能（`with_structured_output`）确保返回格式正确。
+
+### 问题分析
+
+根据日志分析，问题出现在：
+- LLM 调用成功（HTTP 200 OK）
+- 但 JSON 解析失败，无法提取联系人信息
+- 导致返回 0 个联系人
+
+根本原因：
+- 手动解析 JSON 容易失败
+- LLM 返回格式可能不规范
+- 需要复杂的容错逻辑
+
+### 实现逻辑
+
+#### 1. 创建响应模型（schemas/contact.py）
+
+添加了三个 Pydantic 模型用于结构化输出：
+
+- **ContactInfo**: 单个联系人信息（用于 LLM 结构化输出）
+  - 字段：full_name, email, role, linkedin_url, twitter_url, confidence_score
+  - 注意：email 使用 str 而不是 EmailStr，因为 LLM 可能返回无效邮箱
+
+- **ContactsResponse**: 联系人列表响应
+  - 字段：contacts: List[ContactInfo]
+
+- **CompanyInfoResponse**: 公司信息响应
+  - 字段：domain, industry, positioning, brief
+
+#### 2. 添加结构化输出方法（findkp/service.py）
+
+创建了两个新方法使用 LangChain 的 `with_structured_output`：
+
+- **extract_contacts_with_llm()**: 
+  - 使用 `self.llm.with_structured_output(ContactsResponse)`
+  - 直接返回 Pydantic 模型实例，无需 JSON 解析
+  - 如果失败，降级到旧的 JSON 解析方法
+
+- **extract_company_info_with_llm()**: 
+  - 使用 `self.llm.with_structured_output(CompanyInfoResponse)`
+  - 同样支持降级机制
+
+#### 3. 更新调用方
+
+修改了两个调用位置：
+
+- `_search_contacts_parallel()`: 使用 `extract_contacts_with_llm()`
+- `_search_and_save_company_info()`: 使用 `extract_company_info_with_llm()`
+
+简化了后续处理逻辑，因为结构化输出保证返回格式正确。
+
+### 技术优势
+
+1. **解决 JSON 解析问题**: 不再需要手动解析 JSON，避免解析失败
+2. **类型安全**: 直接返回 Pydantic 模型，类型验证自动完成
+3. **自动验证**: Pydantic 自动验证数据格式和类型
+4. **代码简化**: 移除复杂的 JSON 解析逻辑
+5. **降级机制**: 如果结构化输出失败，自动降级到旧的 JSON 解析方法
+6. **更好的错误提示**: 模型验证失败时提供清晰的错误信息
+
+### 修改的文件
+
+- `schemas/contact.py`: 
+  - 添加 `ContactInfo`, `ContactsResponse`, `CompanyInfoResponse` 模型
+
+- `findkp/service.py`: 
+  - 添加 `extract_contacts_with_llm()` 方法
+  - 添加 `extract_company_info_with_llm()` 方法
+  - 修改 `_search_contacts_parallel()` 使用新方法
+  - 修改 `_search_and_save_company_info()` 使用新方法
+  - 保留 `extract_with_llm()` 作为降级方案
+
+### 架构改进
+
+**之前**:
+```
+LLM 调用 → 返回文本 → 手动解析 JSON → 容错处理 → 提取数据
+```
+
+**现在**:
+```
+LLM 调用（结构化输出） → 直接返回 Pydantic 模型 → 转换为字典
+```
+
+### 验证结果
+
+- ✅ 响应模型导入成功
+- ✅ 语法检查通过
+- ✅ 代码结构清晰，向后兼容
+
+### 注意事项
+
+- 结构化输出需要模型支持（大多数现代模型都支持）
+- 如果模型不支持，会自动降级到旧的 JSON 解析方法
+- 保留了旧的 `extract_with_llm()` 方法作为降级方案
+- ContactInfo 中 email 使用 str 而不是 EmailStr，避免 LLM 返回无效邮箱时验证失败
+
+### 参考文档
+
+- [LangChain Agents - Structured Output](https://docs.langchain.com/oss/python/langchain/agents)
+- LangChain V1 `with_structured_output()` 方法文档
+
+---
+
+## 2024-11-06: 集成 Loguru 日志系统并记录 LLM 请求响应
+
+### 需求
+
+1. 使用 loguru 替代标准的 logging 模块
+2. LLM 的请求和响应日志记录到文件中
+3. 在根目录下创建 logs 文件夹
+4. 每次和 LLM 的请求都按照时间戳单独放在指定类型的日志子文件夹目录中
+
+### 实现逻辑
+
+#### 1. 添加 loguru 依赖
+
+在 `pyproject.toml` 中添加 `loguru>=0.7.0` 依赖。
+
+#### 2. 创建日志配置模块（logs/__init__.py）
+
+创建了统一的日志配置模块，包含：
+
+- **日志目录结构**：
+  - `logs/` - 主日志目录
+  - `logs/llm/requests/` - LLM 请求日志目录
+  - `logs/llm/responses/` - LLM 响应日志目录
+
+- **日志配置**：
+  - 控制台输出：彩色格式，INFO 级别
+  - 文件输出：`logs/app_{date}.log`，DEBUG 级别，每日轮转，保留30天，自动压缩
+
+- **LLM 日志函数**：
+  - `log_llm_request()`: 记录 LLM 请求到独立文件，文件名包含时间戳（精确到微秒）
+  - `log_llm_response()`: 记录 LLM 响应到独立文件，关联请求日志路径
+  - `get_llm_log_path()`: 获取日志文件路径
+
+#### 3. 替换所有 logging 为 loguru
+
+替换了以下文件中的 logging：
+- `findkp/service.py`
+- `findkp/router.py`
+- `findkp/search_strategy.py`
+- `findkp/email_search_strategy.py`
+- `findkp/result_aggregator.py`
+- `llm/factory.py`
+- `llm/glm_wrapper.py`
+
+所有文件统一使用 `from logs import logger`。
+
+#### 4. 在 LLM 调用处添加日志记录
+
+在以下方法中添加了请求和响应日志：
+
+- **findkp/service.py**:
+  - `extract_contacts_with_llm()`: 记录联系人提取的请求和响应
+  - `extract_company_info_with_llm()`: 记录公司信息提取的请求和响应
+  - `extract_with_llm()`: 记录通用提取的请求和响应（包括错误情况）
+
+- **llm/glm_wrapper.py**:
+  - `ainvoke()`: 记录 GLM 异步调用的请求和响应
+  - `invoke()`: 记录 GLM 同步调用的请求和响应
+
+#### 5. 日志文件命名规则
+
+每次 LLM 请求生成独立的日志文件：
+
+- **请求日志**: `logs/llm/requests/{YYYYMMDD}_{HHMMSS}_{微秒}.log`
+- **响应日志**: `logs/llm/responses/{YYYYMMDD}_{HHMMSS}_{微秒}.log`
+- 响应日志中包含 `request_log_path` 字段，关联对应的请求日志
+
+### 日志格式
+
+#### LLM 请求日志格式（JSON）
+
+```json
+{
+  "timestamp": "2024-11-06T12:34:56.789012",
+  "model": "deepseek-chat",
+  "messages": [
+    {"role": "user", "content": "..."}
+  ],
+  "task_type": "extract_contacts",
+  "temperature": 0.0
+}
+```
+
+#### LLM 响应日志格式（JSON）
+
+```json
+{
+  "timestamp": "2024-11-06T12:34:57.123456",
+  "response_content": "...",
+  "request_log_path": "logs/llm/requests/20241106_123456_789012.log",
+  "model": "deepseek-chat",
+  "task_type": "extract_contacts"
+}
+```
+
+### 修改的文件
+
+- `pyproject.toml`: 添加 loguru 依赖
+- `logs/__init__.py`: 新建日志配置模块
+- `findkp/service.py`: 替换 logging，添加 LLM 日志记录
+- `findkp/router.py`: 替换 logging
+- `findkp/search_strategy.py`: 替换 logging
+- `findkp/email_search_strategy.py`: 替换 logging
+- `findkp/result_aggregator.py`: 替换 logging
+- `llm/factory.py`: 替换 logging
+- `llm/glm_wrapper.py`: 替换 logging，添加 LLM 日志记录
+
+### 技术优势
+
+1. **统一日志管理**: 使用 loguru 提供更强大的日志功能
+2. **独立日志文件**: 每次 LLM 请求/响应都有独立的日志文件，便于排查
+3. **时间戳精确**: 使用微秒级时间戳，确保文件名唯一
+4. **关联追踪**: 响应日志包含请求日志路径，便于关联查看
+5. **任务类型标识**: 通过 `task_type` 字段区分不同类型的 LLM 调用
+6. **自动轮转**: 应用日志自动按天轮转，保留30天
+
+### 目录结构
+
+```
+logs/
+├── __init__.py                    # 日志配置模块
+├── app_2024-11-06.log            # 应用日志（每日轮转）
+├── llm/
+│   ├── requests/                 # LLM 请求日志目录
+│   │   ├── 20241106_123456_789012.log
+│   │   └── 20241106_123457_123456.log
+│   └── responses/                # LLM 响应日志目录
+│       ├── 20241106_123456_789013.log
+│       └── 20241106_123457_123457.log
+```
+
+### 使用示例
+
+```python
+from logs import logger, log_llm_request, log_llm_response
+
+# 记录请求
+request_log_path = log_llm_request(
+    messages=[{"role": "user", "content": "..."}],
+    model="deepseek-chat",
+    task_type="extract_contacts",
+)
+
+# 调用 LLM
+response = await llm.ainvoke(messages)
+
+# 记录响应
+log_llm_response(
+    response_content=response.content,
+    request_log_path=request_log_path,
+    model="deepseek-chat",
+    task_type="extract_contacts",
+)
+```
+
+### 验证结果
+
+- ✅ logs 模块导入成功
+- ✅ 语法检查通过
+- ✅ 所有文件已替换 logging 为 loguru
+- ✅ LLM 调用处已添加日志记录
+
+---

@@ -1,15 +1,11 @@
 """FindKP API 路由"""
 
-import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from database.connection import get_db
 from schemas.contact import CompanyQuery, FindKPResponse
 from .service import FindKPService
-
-# 设置日志
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from logs import logger
 
 # 创建路由
 router = APIRouter(prefix="/findkp", tags=["FindKP"])

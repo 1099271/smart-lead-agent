@@ -32,3 +32,30 @@ class FindKPResponse(BaseResponse):
     company_id: int
     company_domain: Optional[str] = None
     contacts: List[KPInfo] = []
+
+
+# 结构化输出响应模型（用于 LangChain with_structured_output）
+class ContactInfo(BaseModel):
+    """单个联系人信息（用于 LLM 结构化输出）"""
+    
+    full_name: Optional[str] = None
+    email: Optional[str] = None  # 使用 str 而不是 EmailStr，因为 LLM 可能返回无效邮箱
+    role: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    twitter_url: Optional[str] = None
+    confidence_score: float = 0.0
+
+
+class ContactsResponse(BaseModel):
+    """联系人列表响应（用于 LLM 结构化输出）"""
+    
+    contacts: List[ContactInfo] = []
+
+
+class CompanyInfoResponse(BaseModel):
+    """公司信息响应（用于 LLM 结构化输出）"""
+    
+    domain: Optional[str] = None
+    industry: Optional[str] = None
+    positioning: Optional[str] = None
+    brief: Optional[str] = None

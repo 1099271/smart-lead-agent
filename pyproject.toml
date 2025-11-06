@@ -17,9 +17,10 @@ dependencies = [
     "langchain>=1.0.3",
     "langgraph>=1.0.2",
     "langchain-deepseek>=1.0.0",
-    "zhipuai>=2.0.0",
+    "zai-sdk>=0.0.4",
     "aiomysql>=0.3.2",
     "click>=8.0.0",
+    "loguru>=0.7.0",
 ]
 
 [project.optional-dependencies]

@@ -3,13 +3,12 @@ LLM 工厂模块 - 根据模型名称自动路由到相应的 API 提供商
 """
 
 import os
-import logging
 from typing import Optional, Dict, Any, Tuple
 from langchain.chat_models import init_chat_model
 from config import settings
 from .glm_wrapper import GLMLLMWrapper
 
-logger = logging.getLogger(__name__)
+from logs import logger
 
 
 class LLMRouter:

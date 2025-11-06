@@ -3,11 +3,10 @@
 负责合并多个搜索工具的结果，进行去重和排序。
 """
 
-import logging
 from typing import List, Dict
 from core.schemas import SearchResult
 
-logger = logging.getLogger(__name__)
+from logs import logger
 
 
 class ResultAggregator:

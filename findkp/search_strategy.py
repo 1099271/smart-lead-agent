@@ -3,10 +3,9 @@
 负责生成优化的搜索查询，利用公司名和国家信息提升搜索效果。
 """
 
-import logging
 from typing import List, Dict, Optional, Any
 
-logger = logging.getLogger(__name__)
+from logs import logger
 
 
 class SearchStrategy:

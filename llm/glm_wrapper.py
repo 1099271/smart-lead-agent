@@ -2,19 +2,23 @@
 GLM（智谱AI）SDK 包装类 - 兼容 LangChain ChatModel 接口
 """
 
-import logging
 from typing import List, Dict, Any, Optional
 from langchain_core.messages import AIMessage
-from zhipuai import ZhipuAI
+from zai import ZhipuAiClient
 from config import settings
-
-logger = logging.getLogger(__name__)
+from logs import logger, log_llm_request, log_llm_response
 
 
 class GLMLLMWrapper:
     """GLM（智谱AI）LLM 包装类，兼容 LangChain ChatModel 接口"""
 
-    def __init__(self, model: str, temperature: float = 0.0, api_key: Optional[str] = None, **kwargs):
+    def __init__(
+        self,
+        model: str,
+        temperature: float = 0.0,
+        api_key: Optional[str] = None,
+        **kwargs,
+    ):
         """
         初始化 GLM LLM 包装类
 
@@ -31,7 +35,7 @@ class GLMLLMWrapper:
             raise ValueError("GLM API Key 未配置。请设置 GLM_API_KEY")
 
         # 初始化智谱AI SDK 客户端
-        self.client = ZhipuAI(api_key=self.api_key)
+        self.client = ZhipuAiClient(api_key=self.api_key)
         self.kwargs = kwargs
 
         logger.debug(f"GLM SDK 初始化: model={model}, temperature={temperature}")
@@ -63,7 +67,18 @@ class GLMLLMWrapper:
             **kwargs,
         }
 
-        logger.debug(f"GLM SDK 调用: model={self.model}, messages={len(formatted_messages)}")
+        # 记录 LLM 请求
+        request_log_path = log_llm_request(
+            messages=formatted_messages,
+            model=self.model,
+            temperature=self.temperature,
+            task_type="glm_async",
+            **{k: v for k, v in kwargs.items() if k not in ["messages", "model"]},
+        )
+
+        logger.debug(
+            f"GLM SDK 调用: model={self.model}, messages={len(formatted_messages)}"
+        )
 
         # 调用智谱AI SDK（注意：SDK 是同步的，需要在线程池中运行）
         import asyncio
@@ -78,6 +93,14 @@ class GLMLLMWrapper:
 
         # 提取响应内容
         content = response.choices[0].message.content
+
+        # 记录 LLM 响应
+        log_llm_response(
+            response_content=content,
+            request_log_path=request_log_path,
+            model=self.model,
+            task_type="glm_async",
+        )
 
         logger.debug(f"GLM SDK 响应: content_length={len(content)}")
 
@@ -111,7 +134,18 @@ class GLMLLMWrapper:
             **kwargs,
         }
 
-        logger.debug(f"GLM SDK 同步调用: model={self.model}, messages={len(formatted_messages)}")
+        # 记录 LLM 请求
+        request_log_path = log_llm_request(
+            messages=formatted_messages,
+            model=self.model,
+            temperature=self.temperature,
+            task_type="glm_sync",
+            **{k: v for k, v in kwargs.items() if k not in ["messages", "model"]},
+        )
+
+        logger.debug(
+            f"GLM SDK 同步调用: model={self.model}, messages={len(formatted_messages)}"
+        )
 
         # 直接调用 SDK（同步）
         response = self.client.chat.completions.create(**request_params)
@@ -119,8 +153,15 @@ class GLMLLMWrapper:
         # 提取响应内容
         content = response.choices[0].message.content
 
+        # 记录 LLM 响应
+        log_llm_response(
+            response_content=content,
+            request_log_path=request_log_path,
+            model=self.model,
+            task_type="glm_sync",
+        )
+
         logger.debug(f"GLM SDK 同步响应: content_length={len(content)}")
 
         # 返回 LangChain 兼容的消息对象
         return AIMessage(content=content)
-
