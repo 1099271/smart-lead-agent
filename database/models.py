@@ -21,6 +21,7 @@ class CompanyStatus(enum.Enum):
     processing = "processing"
     completed = "completed"
     failed = "failed"
+    ignore = "ignore"  # 查询不到官网/域名，忽略该公司
 
 
 class Company(Base):

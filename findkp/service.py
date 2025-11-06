@@ -739,7 +739,14 @@ class FindKPService:
         repo: Repository,
     ) -> Company:
         """
-        搜索并保存公司信息
+        搜索并保存公司信息（优化版：顺序查询+早期退出）
+
+        逻辑：
+        1. 优先查询本地名（如果存在且与英文名不同）
+        2. 如果找到 domain + public_emails，信息足够，立即返回
+        3. 如果只找到 domain，继续查询英文名（尝试找邮箱）
+        4. 如果未找到 domain，继续查询英文名
+        5. 如果所有查询都未找到 domain，标记为 ignore
 
         Args:
             company_name_en: 公司名称英文
@@ -751,57 +758,95 @@ class FindKPService:
         Returns:
             Company 对象（已创建或更新的公司记录）
         """
-        # 1. 生成搜索查询
-        logger.info(
-            f"开始搜索公司信息: {company_name_local}"
-            + (f" ({country})" if country else "")
-        )
-        company_queries = self.search_strategy.generate_company_queries(
-            company_name_en, company_name_local, country
-        )
-
-        # 2. 并行执行多工具搜索
-        company_results_map = await self._search_with_multiple_providers(
-            company_queries, db=db
-        )
-
-        # 3. 聚合结果
-        aggregated_company_results = self.result_aggregator.aggregate(
-            company_results_map
-        )
-
-        # 4. 转换为字典格式用于 LLM
-        company_results = [
-            {"title": r.title, "link": str(r.link), "snippet": r.snippet}
-            for r in aggregated_company_results
-        ]
-
-        # 5. LLM 提取公司信息（使用结构化输出）
-        country_context = self._get_country_context(country)
-        company_info = await self.extract_company_info_with_llm(
-            EXTRACT_COMPANY_INFO_PROMPT.format(
-                country_context=country_context,
-                search_results=json.dumps(company_results, ensure_ascii=False),
-            )
-        )
-
-        # 6. 创建或获取公司记录
         company = await repo.get_or_create_company(company_name_en)
-        company.domain = company_info.get("domain")
-        company.industry = company_info.get("industry")
-        company.positioning = company_info.get("positioning")
-        company.brief = company_info.get("brief")
-        company.status = CompanyStatus.processing
-        await db.commit()
-        await db.refresh(company)
-        logger.info(f"公司记录已创建/更新: {company.name}")
+        country_context = self._get_country_context(country)
 
-        # 7. 从搜索结果中提取并保存公共邮箱
-        if company_results:
-            await self._extract_and_save_public_emails(
-                company, company_results, db, repo
+        # 定义查询顺序：优先本地名，回退英文名
+        query_sequence = []
+        if company_name_local and company_name_local.strip() != company_name_en.strip():
+            query_sequence.append(("local", company_name_local))
+        query_sequence.append(("en", company_name_en))
+
+        # 顺序执行查询
+        for priority, company_name in query_sequence:
+            logger.info(
+                f"查询公司信息 [{priority}]: {company_name}"
+                + (f" ({country})" if country else "")
             )
 
+            # 1. 生成单个查询
+            query_params = self.search_strategy.generate_company_query(
+                company_name, country
+            )
+
+            # 2. 执行搜索
+            results_map = await self._search_with_multiple_providers(
+                [query_params], db=db
+            )
+
+            # 3. 聚合结果
+            aggregated_results = self.result_aggregator.aggregate(results_map)
+            company_results = [
+                {"title": r.title, "link": str(r.link), "snippet": r.snippet}
+                for r in aggregated_results
+            ]
+
+            # 4. LLM提取公司信息
+            company_info = await self.extract_company_info_with_llm(
+                EXTRACT_COMPANY_INFO_PROMPT.format(
+                    country_context=country_context,
+                    search_results=json.dumps(company_results, ensure_ascii=False),
+                )
+            )
+
+            # 5. 更新公司信息
+            domain = company_info.get("domain")
+            if domain:
+                company.domain = domain
+                company.industry = company_info.get("industry")
+                company.positioning = company_info.get("positioning")
+                company.brief = company_info.get("brief")
+                company.status = CompanyStatus.processing
+                await db.commit()
+                await db.refresh(company)
+
+                # 6. 提取并保存公共邮箱
+                if company_results:
+                    await self._extract_and_save_public_emails(
+                        company, company_results, db, repo
+                    )
+                    await db.refresh(company)  # 刷新以获取public_emails
+
+                # 7. 检查信息是否足够：domain + public_emails 都找到
+                if company.domain and company.public_emails:
+                    logger.info(
+                        f"信息足够（domain + public_emails），停止公司信息查询: "
+                        f"{company.domain}, emails: {company.public_emails}"
+                    )
+                    return company
+
+                # 8. 如果找到 domain 但还没有 public_emails
+                # 如果是本地名查询，继续尝试英文名查询（尝试找邮箱）
+                # 如果是英文名查询，直接返回（domain已足够）
+                if priority == "local":
+                    logger.info(
+                        f"找到域名但未找到邮箱 [{priority}]，继续查询英文名尝试找邮箱: {company.domain}"
+                    )
+                    # 继续循环，尝试英文名查询
+                else:
+                    # 英文名查询完成，即使没有 public_emails，domain 已足够
+                    logger.info(
+                        f"找到域名但未找到邮箱 [{priority}]，domain已足够: {company.domain}"
+                    )
+                    return company
+            else:
+                # 未找到 domain
+                logger.warning(f"查询 [{priority}] 未找到域名，继续下一个查询策略")
+
+        # 如果所有查询都未找到 domain，标记为 ignore
+        logger.warning(f"所有查询策略都未找到域名，标记为ignore: {company_name_en}")
+        company.status = CompanyStatus.ignore
+        await db.commit()
         return company
 
     async def _search_and_save_contacts(
@@ -815,7 +860,9 @@ class FindKPService:
         repo: Repository,
     ) -> List[KPInfo]:
         """
-        搜索并保存联系人（独立方法，可被复用）
+        搜索并保存联系人（优化版：必须有域名）
+
+        如果没有域名，直接返回空列表，不执行联系人查询
 
         Args:
             company: 公司对象
@@ -829,6 +876,11 @@ class FindKPService:
         Returns:
             保存的联系人列表（KPInfo）
         """
+        # 检查域名：如果没有域名，直接返回空列表
+        if not company.domain:
+            logger.info(f"公司 {company.name} 没有域名，跳过联系人查询")
+            return []
+
         # 1. 并行搜索采购和销售部门 KP
         logger.info(
             f"并行搜索采购和销售部门 KP: {company_name_en}"
@@ -986,7 +1038,13 @@ class FindKPService:
         db: AsyncSession,
     ) -> Dict:
         """
-        主流程: 查找公司的 KP 联系人（异步版本）
+        主流程: 查找公司的 KP 联系人（优化版）
+
+        流程：
+        1. 检查缓存和状态（ignore状态直接返回）
+        2. 查询公司信息（顺序查询，信息足够时提前停止）
+        3. 如果状态为ignore，直接返回（不查询联系人）
+        4. 查询联系人（内部会检查域名）
 
         Args:
             company_name_en: 公司名称英文
@@ -1000,8 +1058,19 @@ class FindKPService:
         repo = Repository(db)
 
         try:
-            # 0. 检查缓存：如果公司已完成且联系人已存在，直接返回
+            # 0. 检查缓存和状态
             company = await repo.get_company_by_name(company_name_en)
+
+            # 如果公司状态为ignore，直接返回空结果
+            if company and company.status == CompanyStatus.ignore:
+                logger.info(f"公司 {company_name_en} 已标记为ignore，跳过查询")
+                return {
+                    "company_id": company.id,
+                    "company_domain": None,
+                    "contacts": [],
+                }
+
+            # 如果公司已完成且联系人已存在，直接返回
             if company and company.status == CompanyStatus.completed:
                 logger.info(f"公司 {company_name_en} 已完成，查询现有联系人...")
                 existing_contacts = await repo.get_contacts_by_company(company.id)
@@ -1065,6 +1134,8 @@ class FindKPService:
                         "company_domain": company.domain,
                         "contacts": all_contacts,
                     }
+
+            # 1. 查询公司信息（顺序查询，信息足够时提前停止）
             company = await self._search_and_save_company_info(
                 company_name_en,
                 company_name_local,
@@ -1072,9 +1143,20 @@ class FindKPService:
                 db,
                 repo,
             )
-            country_context = self._get_country_context(country)
 
-            # 6. 搜索并保存联系人
+            # 2. 如果公司状态为ignore，直接返回（不查询联系人）
+            if company.status == CompanyStatus.ignore:
+                logger.info(
+                    f"公司 {company_name_en} 查询不到域名，标记为ignore，跳过联系人查询"
+                )
+                return {
+                    "company_id": company.id,
+                    "company_domain": None,
+                    "contacts": [],
+                }
+
+            # 3. 查询联系人（内部会检查域名，如果没有域名会直接返回空列表）
+            country_context = self._get_country_context(country)
             all_contacts = await self._search_and_save_contacts(
                 company,
                 company_name_en,
@@ -1085,7 +1167,7 @@ class FindKPService:
                 repo,
             )
 
-            # 更新公司状态
+            # 4. 更新公司状态为已完成
             company.status = CompanyStatus.completed
             await db.commit()
             logger.info(
