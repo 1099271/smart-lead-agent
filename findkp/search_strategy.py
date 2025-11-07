@@ -90,6 +90,37 @@ class SearchStrategy:
 
         return {"gl": gl, "hl": hl, "location": location}
 
+    def generate_company_query(
+        self,
+        company_name: str,
+        country: Optional[str],
+    ) -> Dict[str, Any]:
+        """
+        生成单个公司信息搜索查询（简化版）
+
+        Args:
+            company_name: 公司名称（本地名或英文名）
+            country: 国家名称（可选）
+
+        Returns:
+            查询参数字典
+        """
+        country_params = self.get_country_params(country)
+
+        query = f"{company_name} official website"
+        if country:
+            query += f" {country}"
+
+        query_params = {"q": query}
+        if country_params["gl"]:
+            query_params["gl"] = country_params["gl"]
+        if country_params["hl"]:
+            query_params["hl"] = country_params["hl"]
+        if country_params["location"]:
+            query_params["location"] = country_params["location"]
+
+        return query_params
+
     def generate_company_queries(
         self,
         company_name_en: str,

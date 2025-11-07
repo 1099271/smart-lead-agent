@@ -2,6 +2,8 @@
 
 import click
 from cli.findkp import findkp
+from cli.batch_findkp import batch_findkp
+
 
 # 创建主 CLI 组
 @click.group()
@@ -13,7 +15,7 @@ def cli():
 
 # 注册子命令
 cli.add_command(findkp)
+cli.add_command(batch_findkp)
 
 if __name__ == "__main__":
     cli()
-

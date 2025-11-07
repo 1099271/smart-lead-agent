@@ -1,3 +1,4 @@
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Optional, List, Dict, Any
@@ -12,19 +13,34 @@ class Repository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_or_create_company(self, name: str) -> models.Company:
+    async def get_or_create_company(
+        self, name: str, local_name: Optional[str] = None
+    ) -> models.Company:
         """
         根据公司名称获取公司,如果不存在则创建（异步版本）
+
+        Args:
+            name: 公司英文名称
+            local_name: 公司本地名称（可选）
+
+        Returns:
+            Company 对象
         """
         result = await self.db.execute(
             select(models.Company).filter(models.Company.name == name)
         )
         company = result.scalar_one_or_none()
         if not company:
-            company = models.Company(name=name)
+            company = models.Company(name=name, local_name=local_name)
             self.db.add(company)
             await self.db.commit()
             await self.db.refresh(company)
+        else:
+            # 如果公司已存在，但 local_name 为空且传入了 local_name，则更新
+            if not company.local_name and local_name:
+                company.local_name = local_name
+                await self.db.commit()
+                await self.db.refresh(company)
         return company
 
     async def get_company_by_name(self, name: str) -> Optional[models.Company]:
@@ -237,3 +253,134 @@ class Repository:
             await self.db.flush()  # 只 flush，不 commit
 
         return results
+
+    async def create_trade_records_batch(
+        self,
+        trade_records: List[Dict[str, Any]],
+        source_file: str,
+        auto_commit: bool = True,
+    ) -> List[models.TradeRecord]:
+        """
+        批量创建贸易记录（异步版本）
+
+        Args:
+            trade_records: 贸易记录字典列表
+            source_file: 来源文件路径
+            auto_commit: 是否自动提交，默认 True
+
+        Returns:
+            创建的 TradeRecord 列表
+        """
+        records = []
+        for item in trade_records:
+            # 解析日期字符串
+            date_value = None
+            if item.get("date"):
+                try:
+                    date_str = item["date"]
+                    # 处理 ISO 格式日期字符串
+                    if "T" in date_str:
+                        date_value = datetime.fromisoformat(
+                            date_str.replace("Z", "+00:00")
+                        )
+                    else:
+                        date_value = datetime.fromisoformat(date_str)
+                except Exception:
+                    date_value = None
+
+            record = models.TradeRecord(
+                trade_id=item.get("tradeId"),
+                trade_date=date_value,
+                importer=item.get("importer"),
+                importer_country_code=item.get("importerCountryCode"),
+                importer_id=item.get("importerId"),
+                importer_en=item.get("importerEn"),
+                importer_orig=item.get("importerOrig"),
+                exporter=item.get("exporter"),
+                exporter_country_code=item.get("exporterCountryCode"),
+                exporter_orig=item.get("exporterOrig"),
+                catalog=item.get("catalog"),
+                state_of_origin=item.get("stateOfOrigin"),
+                state_of_destination=item.get("stateOfDestination"),
+                batch_id=item.get("batchId"),
+                sum_of_usd=item.get("sumOfUSD"),
+                gd_no=item.get("gdNo"),
+                weight_unit_price=item.get("weightUnitPrice"),
+                source_database=item.get("database"),
+                product_tag=item.get("productTag"),
+                goods_desc=item.get("goodsDesc"),
+                goods_desc_vn=item.get("goodsDescVn"),
+                hs_code=item.get("hsCode"),
+                country_of_origin_code=item.get("countryOfOriginCode"),
+                country_of_origin=item.get("countryOfOrigin"),
+                country_of_destination=item.get("countryOfDestination"),
+                country_of_destination_code=item.get("countryOfDestinationCode"),
+                country_of_trade=item.get("countryOfTrade"),
+                qty=item.get("qty"),
+                qty_unit=item.get("qtyUnit"),
+                qty_unit_price=item.get("qtyUnitPrice"),
+                weight=item.get("weight"),
+                transport_type=item.get("transportType"),
+                payment=item.get("payment"),
+                incoterm=item.get("incoterm"),
+                trade_mode=item.get("tradeMode"),
+                rep_num=item.get("repNum"),
+                primary_flag=item.get("primary"),
+                source_file=source_file,
+            )
+            self.db.add(record)
+            records.append(record)
+
+        # 批量提交
+        if auto_commit:
+            await self.db.commit()
+            # 刷新所有对象
+            for record in records:
+                await self.db.refresh(record)
+        else:
+            await self.db.flush()
+
+        return records
+
+    async def get_processed_file(
+        self, file_path: str
+    ) -> Optional[models.ProcessedFile]:
+        """
+        查询已处理文件记录（异步版本）
+
+        Args:
+            file_path: 文件路径
+
+        Returns:
+            ProcessedFile 实例，如果不存在则返回 None
+        """
+        result = await self.db.execute(
+            select(models.ProcessedFile).filter(
+                models.ProcessedFile.file_path == file_path
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def create_processed_file(
+        self, file_path: str, file_size: int, records_count: int
+    ) -> models.ProcessedFile:
+        """
+        创建已处理文件记录（异步版本）
+
+        Args:
+            file_path: 文件路径
+            file_size: 文件大小（字节）
+            records_count: 导入的记录数
+
+        Returns:
+            创建的 ProcessedFile 实例
+        """
+        processed_file = models.ProcessedFile(
+            file_path=file_path,
+            file_size=file_size,
+            records_count=records_count,
+        )
+        self.db.add(processed_file)
+        await self.db.commit()
+        await self.db.refresh(processed_file)
+        return processed_file

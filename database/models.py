@@ -9,6 +9,8 @@ from sqlalchemy import (
     TIMESTAMP,
     DECIMAL,
     JSON,
+    BigInteger,
+    DateTime,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -21,6 +23,7 @@ class CompanyStatus(enum.Enum):
     processing = "processing"
     completed = "completed"
     failed = "failed"
+    ignore = "ignore"  # 查询不到官网/域名，忽略该公司
 
 
 class Company(Base):
@@ -30,6 +33,7 @@ class Company(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), unique=True, nullable=False, index=True)
+    local_name = Column(String(255))  # 公司本地名称
     domain = Column(String(255))  # 公司域名
     industry = Column(String(100))  # 行业
     positioning = Column(Text)  # 公司定位描述
@@ -102,3 +106,83 @@ class SerperOrganicResult(Base):
     snippet = Column(Text, comment="摘要")
     date = Column(String(50), comment="日期（可选）")
     created_at = Column(TIMESTAMP, server_default=func.now())
+
+
+class TradeRecord(Base):
+    """贸易记录表模型"""
+
+    __tablename__ = "trade_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    trade_id = Column(String(64), index=True, comment="贸易ID")
+    trade_date = Column(DateTime, index=True, comment="贸易日期")
+
+    # 进口商信息
+    importer = Column(String(512), index=True, comment="进口商名称")
+    importer_country_code = Column(String(10), index=True, comment="进口商国家代码")
+    importer_id = Column(String(64), comment="进口商ID")
+    importer_en = Column(String(512), comment="进口商英文名称")
+    importer_orig = Column(String(512), comment="进口商原始名称")
+
+    # 出口商信息
+    exporter = Column(String(512), index=True, comment="出口商名称")
+    exporter_country_code = Column(String(10), index=True, comment="出口商国家代码")
+    exporter_orig = Column(String(512), comment="出口商原始名称")
+
+    # 贸易基本信息
+    catalog = Column(String(50), index=True, comment="目录类型(imports/exports)")
+    state_of_origin = Column(String(100), comment="原产地")
+    state_of_destination = Column(String(100), comment="目的地")
+    batch_id = Column(BigInteger, index=True, comment="批次ID")
+    sum_of_usd = Column(DECIMAL(15, 2), comment="美元金额")
+    gd_no = Column(String(64), comment="报关单号")
+    weight_unit_price = Column(DECIMAL(15, 4), comment="重量单价")
+    source_database = Column(String(50), comment="数据库来源")
+
+    # 产品信息
+    product_tag = Column(JSON, comment="产品标签(JSON数组)")
+    goods_desc = Column(Text, comment="商品描述")
+    goods_desc_vn = Column(Text, comment="商品描述(越南语)")
+    hs_code = Column(String(20), comment="HS编码")
+
+    # 国家/地区信息
+    country_of_origin_code = Column(String(10), comment="原产国代码")
+    country_of_origin = Column(String(100), comment="原产国")
+    country_of_destination = Column(String(100), comment="目的国")
+    country_of_destination_code = Column(String(10), comment="目的国代码")
+    country_of_trade = Column(String(100), comment="贸易国家")
+
+    # 数量信息
+    qty = Column(DECIMAL(15, 4), comment="数量")
+    qty_unit = Column(String(20), comment="数量单位")
+    qty_unit_price = Column(DECIMAL(15, 4), comment="数量单价")
+    weight = Column(DECIMAL(15, 4), comment="重量")
+
+    # 贸易方式
+    transport_type = Column(String(50), comment="运输类型")
+    payment = Column(String(50), comment="支付方式")
+    incoterm = Column(String(20), comment="贸易术语")
+    trade_mode = Column(String(255), comment="贸易模式")
+
+    # 其他信息
+    rep_num = Column(Integer, comment="代表编号")
+    primary_flag = Column(String(10), comment="主要标识")
+    source_file = Column(String(512), index=True, comment="来源文件路径")
+
+    # 时间戳
+    created_at = Column(TIMESTAMP, server_default=func.now(), index=True)
+    updated_at = Column(
+        TIMESTAMP, server_default=func.now(), onupdate=func.current_timestamp()
+    )
+
+
+class ProcessedFile(Base):
+    """已处理文件记录表模型"""
+
+    __tablename__ = "processed_files"
+
+    id = Column(Integer, primary_key=True, index=True)
+    file_path = Column(String(512), unique=True, nullable=False, index=True, comment="文件路径")
+    file_size = Column(BigInteger, comment="文件大小(字节)")
+    processed_at = Column(TIMESTAMP, server_default=func.now(), index=True, comment="处理时间")
+    records_count = Column(Integer, default=0, comment="导入的记录数")
