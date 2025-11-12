@@ -135,6 +135,27 @@ class Repository:
 
         return contacts
 
+    async def get_all_contacts_with_email_by_company(
+        self, company_id: int
+    ) -> List[models.Contact]:
+        """
+        获取指定公司的所有有邮箱的联系人（异步版本）
+
+        Args:
+            company_id: 公司ID
+
+        Returns:
+            有邮箱的联系人列表
+        """
+        result = await self.db.execute(
+            select(models.Contact).filter(
+                models.Contact.company_id == company_id,
+                models.Contact.email.isnot(None),
+                models.Contact.email != "",
+            )
+        )
+        return result.scalars().all()
+
     async def get_contacts_by_company(self, company_id: int) -> List[models.Contact]:
         """
         获取指定公司的所有联系人（异步版本）

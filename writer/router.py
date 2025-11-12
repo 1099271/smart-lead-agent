@@ -35,11 +35,9 @@ async def generate_emails(
         logger.info(
             f"收到 Writer 请求: company_id={request.company_id}, "
             f"company_name={request.company_name}, "
-            f"llm_model={request.llm_model}"
         )
 
-        # 创建服务实例（如果指定了 LLM 模型，在初始化时传入）
-        service = WriterService(llm_model=request.llm_model)
+        service = WriterService()
 
         result = await service.generate_emails(
             company_id=request.company_id,

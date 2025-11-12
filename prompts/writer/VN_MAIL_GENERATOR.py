@@ -162,8 +162,8 @@ assumptions:
       <R>
         <purpose>致敬/认可公司或行业趋势。</purpose>
         <fallback_rule>
-          如果 {brief_cn} 或 {positioning_cn} 提供了足够信息（无论中/英文），请理解其含义并据此赞美。
-          如果信息不足 (NULL 或少于 10 词)，则必须转为赞美 {industry_cn} 行业（无论中/英文）对越南经济的普遍贡献。
+          如果 brief_cn 或 positioning_cn 提供了足够信息（无论中/英文），请理解其含义并据此赞美。
+          如果信息不足 (NULL 或少于 10 词)，则必须转为赞美 industry_cn 行业（无论中/英文）对越南经济的普遍贡献。
           严禁编造公司特有事实。
         </fallback_rule>
       </R>
@@ -211,20 +211,20 @@ assumptions:
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>[EN Subject]</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f4f4f4; color: #333; }
-        .container { background-color: #ffffff; margin: 0 auto; padding: 20px 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); max-width: 600px; }
-        h1, h2, h3 { color: #0056b3; }
-        p { line-height: 1.6; margin-bottom: 10px; }
-        .footer { font-size: 0.8em; color: #666; margin-top: 30px; border-top: 1px solid #eee; padding-top: 15px; }
-        ul { margin-bottom: 10px; padding-left: 20px; }
-        li { margin-bottom: 5px; }
-        a { color: #007bff; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-        .signature-block { margin-top: 20px; font-size: 0.9em; line-height: 1.4; }
-        .signature-block strong { display: block; margin-bottom: 5px; }
-        .image-container { text-align: center; margin: 20px 0; }
-        .image-container img { max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; display: block; margin: 10px auto; }
-        .separator { border-top: 1px dashed #ccc; margin: 30px 0; } /* 用于分隔英越语 */
+        body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f4f4f4; color: #333; }}
+        .container {{ background-color: #ffffff; margin: 0 auto; padding: 20px 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); max-width: 600px; }}
+        h1, h2, h3 {{ color: #0056b3; }}
+        p {{ line-height: 1.6; margin-bottom: 10px; }}
+        .footer {{ font-size: 0.8em; color: #666; margin-top: 30px; border-top: 1px solid #eee; padding-top: 15px; }}
+        ul {{ margin-bottom: 10px; padding-left: 20px; }}
+        li {{ margin-bottom: 5px; }}
+        a {{ color: #007bff; text-decoration: none; }}
+        a:hover {{ text-decoration: underline; }}
+        .signature-block {{ margin-top: 20px; font-size: 0.9em; line-height: 1.4; }}
+        .signature-block strong {{ display: block; margin-bottom: 5px; }}
+        .image-container {{ text-align: center; margin: 20px 0; }}
+        .image-container img {{ max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; display: block; margin: 10px auto; }}
+        .separator {{ border-top: 1px dashed #ccc; margin: 30px 0; }} /* 用于分隔英越语 */
     </style>
 </head>
 <body>

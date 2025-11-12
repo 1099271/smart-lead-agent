@@ -17,16 +17,12 @@ from logs import logger, log_llm_request, log_llm_response
 class WriterService:
     """Writer 服务类，负责生成营销邮件（异步版本）"""
 
-    def __init__(self, llm_model: Optional[str] = None):
+    def __init__(self):
         """
         初始化 Writer 服务
-
-        Args:
-            llm_model: 指定 LLM 模型类型（如 "gpt-4o", "deepseek-chat"），
-                       如果为 None 则使用默认配置
         """
         # 使用统一的 LLM 工厂函数，支持指定模型类型
-        self.llm = get_llm(model=llm_model)
+        self.llm = get_llm()
 
     def _separate_stages(self, content: str) -> tuple[str, str]:
         """
@@ -268,7 +264,6 @@ class WriterService:
         company_id: Optional[int] = None,
         company_name: Optional[str] = None,
         db: AsyncSession = None,
-        llm_model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         生成邮件主方法
@@ -277,7 +272,6 @@ class WriterService:
             company_id: 公司ID（可选）
             company_name: 公司名称（可选）
             db: 数据库会话
-            llm_model: 指定 LLM 模型类型（可选）
 
         Returns:
             包含公司信息和邮件列表的字典
@@ -287,10 +281,6 @@ class WriterService:
         """
         if not db:
             raise ValueError("数据库会话不能为空")
-
-        # 如果指定了 LLM 模型，重新初始化服务
-        if llm_model:
-            self.llm = get_llm(model=llm_model)
 
         repository = Repository(db)
 
@@ -306,7 +296,7 @@ class WriterService:
             raise ValueError(f"公司不存在: {company_id or company_name}")
 
         # 查询联系人
-        contacts = await repository.get_contacts_by_company(company.id)
+        contacts = await repository.get_all_contacts_with_email_by_company(company.id)
         logger.info(f"公司 {company.name} 共有 {len(contacts)} 个联系人")
 
         # 去重
@@ -358,24 +348,18 @@ class WriterService:
     async def generate_emails_for_all_contacts(
         self,
         db: AsyncSession,
-        llm_model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         为所有有邮箱的联系人生成邮件（按邮箱去重）
 
         Args:
             db: 数据库会话
-            llm_model: 指定 LLM 模型类型（可选）
 
         Returns:
             包含邮件列表的字典
         """
         if not db:
             raise ValueError("数据库会话不能为空")
-
-        # 如果指定了 LLM 模型，重新初始化服务
-        if llm_model:
-            self.llm = get_llm(model=llm_model)
 
         repository = Repository(db)
 

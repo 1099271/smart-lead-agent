@@ -4650,3 +4650,87 @@ smart-lead writer batch-generate --llm-model "deepseek-chat" --verbose
    - `EmailContent` 包含发送所需的所有信息
 
 ---
+
+## 2025-11-12 19:45:46 - 修复 prompts 模块导入错误
+
+### 需求描述
+
+修复 CLI 命令执行时出现的 `ModuleNotFoundError: No module named 'prompts'` 错误。
+
+错误信息：
+```
+File "/www/htdocs/smart-lead-agent/findkp/service.py", line 13, in <module>
+    from prompts.findkp.FINDKP_PROMPT import (
+ModuleNotFoundError: No module named 'prompts'
+```
+
+### 问题分析
+
+**根本原因**：
+
+1. `prompts` 目录缺少 `__init__.py` 文件，导致 Python 无法将其识别为包
+2. `pyproject.toml` 的 `packages` 列表中未包含 `prompts`，导致包安装时未包含该模块
+
+### 实现逻辑
+
+#### 1. 创建必要的 `__init__.py` 文件
+
+**1.1 创建 `prompts/__init__.py`**
+- 创建空文件，使 `prompts` 目录被识别为 Python 包
+
+**1.2 创建 `prompts/findkp/__init__.py`**
+- 创建空文件，使 `prompts/findkp` 目录被识别为 Python 包
+
+**1.3 创建 `prompts/writer/__init__.py`**
+- 创建空文件，使 `prompts/writer` 目录被识别为 Python 包
+
+#### 2. 更新 `pyproject.toml` 配置
+
+**2.1 添加 `prompts` 到 packages 列表**
+
+```toml
+[tool.setuptools]
+packages = ["cli", "core", "database", "findkp", "llm", "logs", "mail_manager", "prompts", "schemas", "writer"]
+```
+
+**2.2 重新安装包**
+
+```bash
+uv pip install -e .
+```
+
+### 修改文件清单
+
+1. ✅ `prompts/__init__.py` - 创建空文件
+2. ✅ `prompts/findkp/__init__.py` - 创建空文件
+3. ✅ `prompts/writer/__init__.py` - 创建空文件
+4. ✅ `pyproject.toml` - 添加 `prompts` 到 packages 列表
+
+### 验证结果
+
+- ✅ `prompts` 模块导入成功
+- ✅ `prompts.findkp.FINDKP_PROMPT` 导入成功
+- ✅ CLI 命令可以正常执行
+- ✅ `smart-lead --help` 命令正常工作
+
+### 技术要点
+
+1. **Python 包识别**：
+   - Python 需要 `__init__.py` 文件才能将目录识别为包
+   - 即使文件为空，也必须存在
+
+2. **setuptools 包配置**：
+   - `pyproject.toml` 中的 `packages` 列表指定哪些目录应该被包含在安装包中
+   - 如果模块不在列表中，即使有 `__init__.py` 也可能无法正确导入
+
+3. **开发模式安装**：
+   - 使用 `uv pip install -e .` 以可编辑模式安装包
+   - 修改代码后无需重新安装，直接生效
+
+### 注意事项
+
+1. **包结构**：确保所有需要导入的模块都在 `packages` 列表中
+2. **重新安装**：修改 `pyproject.toml` 后需要重新安装包才能生效
+3. **向后兼容**：添加 `__init__.py` 文件不影响现有功能
+
+---

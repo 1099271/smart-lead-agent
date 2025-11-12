@@ -10,7 +10,6 @@ class GenerateEmailRequest(BaseModel):
 
     company_id: Optional[int] = None
     company_name: Optional[str] = None
-    llm_model: Optional[str] = None  # 指定 LLM 模型类型
 
     @model_validator(mode="after")
     def validate_at_least_one(self):

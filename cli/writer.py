@@ -47,11 +47,6 @@ def writer_group():
     help="公司名称",
 )
 @click.option(
-    "--llm-model",
-    type=str,
-    help="指定 LLM 模型类型（如 gpt-4o, deepseek-chat）",
-)
-@click.option(
     "-v",
     "--verbose",
     is_flag=True,
@@ -61,7 +56,6 @@ def writer_group():
 def generate(
     company_id: Optional[int],
     company_name: Optional[str],
-    llm_model: Optional[str],
     verbose: bool,
 ):
     """
@@ -70,7 +64,6 @@ def generate(
     示例:
         smart-lead writer generate --company-id 1
         smart-lead writer generate --company-name "Apple Inc."
-        smart-lead writer generate --company-id 1 --llm-model "gpt-4o"
     """
     setup_logging(verbose)
 
@@ -88,12 +81,10 @@ def generate(
             logger.info(f"公司 ID: {company_id}")
         if company_name:
             logger.info(f"公司名称: {company_name}")
-        if llm_model:
-            logger.info(f"LLM 模型: {llm_model}")
         logger.info("")
 
         # 运行异步任务
-        result = asyncio.run(_run_generate(company_id, company_name, llm_model))
+        result = asyncio.run(_run_generate(company_id, company_name))
 
         # 输出结果
         logger.info("")
@@ -132,20 +123,15 @@ def generate(
         return 1
 
 
-async def _run_generate(
-    company_id: Optional[int],
-    company_name: Optional[str],
-    llm_model: Optional[str],
-):
+async def _run_generate(company_id: Optional[int], company_name: Optional[str]):
     """执行生成邮件异步任务"""
     async with AsyncSessionLocal() as session:
         try:
-            service = WriterService(llm_model=llm_model)
+            service = WriterService()
             result = await service.generate_emails(
                 company_id=company_id,
                 company_name=company_name,
                 db=session,
-                llm_model=llm_model,
             )
             await session.commit()
             return result
@@ -159,25 +145,19 @@ async def _run_generate(
 
 @writer_group.command(name="batch-generate")
 @click.option(
-    "--llm-model",
-    type=str,
-    help="指定 LLM 模型类型（如 gpt-4o, deepseek-chat）",
-)
-@click.option(
     "-v",
     "--verbose",
     is_flag=True,
     help="显示详细日志输出",
     default=False,
 )
-def batch_generate(llm_model: Optional[str], verbose: bool):
+def batch_generate(verbose: bool):
     """
     为所有有邮箱的联系人生成邮件（按邮箱去重）
 
     示例:
         smart-lead writer batch-generate
-        smart-lead writer batch-generate --llm-model "gpt-4o"
-        smart-lead writer batch-generate --llm-model "deepseek-chat" --verbose
+        smart-lead writer batch-generate --verbose
     """
     setup_logging(verbose)
 
@@ -185,12 +165,10 @@ def batch_generate(llm_model: Optional[str], verbose: bool):
         logger.info("=" * 60)
         logger.info("Writer - 批量生成营销邮件")
         logger.info("=" * 60)
-        if llm_model:
-            logger.info(f"LLM 模型: {llm_model}")
         logger.info("")
 
         # 运行异步任务
-        result = asyncio.run(_run_batch_generate(llm_model))
+        result = asyncio.run(_run_batch_generate())
 
         # 输出结果
         logger.info("")
@@ -230,15 +208,12 @@ def batch_generate(llm_model: Optional[str], verbose: bool):
         return 1
 
 
-async def _run_batch_generate(llm_model: Optional[str]):
+async def _run_batch_generate():
     """执行批量生成邮件异步任务"""
     async with AsyncSessionLocal() as session:
         try:
-            service = WriterService(llm_model=llm_model)
-            result = await service.generate_emails_for_all_contacts(
-                db=session,
-                llm_model=llm_model,
-            )
+            service = WriterService()
+            result = await service.generate_emails_for_all_contacts(db=session)
             await session.commit()
             return result
         except Exception as e:
