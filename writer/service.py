@@ -9,7 +9,7 @@ from llm import get_llm
 from database.repository import Repository
 from database.models import Company, Contact
 from schemas.writer import EmailContent, GeneratedEmail as WriterGeneratedEmail
-from prompts.writer.VN_MAIL_GENERATOR import W_VN_MAIL_GENERATOR
+from prompts.writer.WRITER_V2 import BRIEF_PROMPT
 from config import settings
 from logs import logger, log_llm_request, log_llm_response
 
@@ -113,7 +113,7 @@ class WriterService:
         )
         has_screenshot_filters = "true" if settings.IMAGE_URL_FILTERS else "false"
 
-        prompt = W_VN_MAIL_GENERATOR.format(
+        prompt = BRIEF_PROMPT.format(
             # 公司信息
             company_en_name=company.name or "",
             company_local_name=company.local_name or "",

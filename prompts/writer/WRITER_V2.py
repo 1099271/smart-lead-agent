@@ -1,6 +1,6 @@
 """Writer 模块的 LLM Prompt VN Mail Generator 模板"""
 
-W_VN_MAIL_GENERATOR = """
+BRIEF_PROMPT = """
 <prompt name="VN_B2B_ColdEmail_TD_V5_TwoStage" version="2.1">
   <meta>
     <role>
