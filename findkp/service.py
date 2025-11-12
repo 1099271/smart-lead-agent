@@ -762,7 +762,9 @@ class FindKPService:
             Company 对象（已创建或更新的公司记录）
         """
         company = await repo.get_or_create_company(
-            company_name_en, local_name=company_name_local
+            company_name_en,
+            country=country,
+            local_name=company_name_local,
         )
         country_context = self._get_country_context(country)
 
@@ -1039,7 +1041,7 @@ class FindKPService:
         self,
         company_name_en: str,
         company_name_local: str,
-        country: Optional[str],
+        country: str,
         db: AsyncSession,
     ) -> Dict:
         """
@@ -1054,7 +1056,7 @@ class FindKPService:
         Args:
             company_name_en: 公司名称英文
             company_name_local: 公司名称本地
-            country: 国家名称（可选）
+            country: 国家名称
             db: 异步数据库会话
 
         Returns:
@@ -1191,7 +1193,7 @@ class FindKPService:
             # 更新公司状态为失败
             try:
                 company = await repo.get_or_create_company(
-                    company_name_en, local_name=company_name_local
+                    company_name_en, country=country, local_name=company_name_local
                 )
                 company.status = CompanyStatus.failed
                 await db.commit()

@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 from functools import lru_cache
+from typing import Dict
 
 # 在模块加载时，显式地从 .env 文件加载环境变量
 # 这确保了无论从哪里启动应用，配置都能被正确加载
@@ -57,6 +58,118 @@ class Settings(BaseSettings):
         "env_file_encoding": "utf-8",
         "extra": "ignore",  # 允许 .env 文件中有额外的配置项（如邮件配置等）
     }
+
+
+# 国家-语言映射配置（用于 WRITER_V3 本地化）
+# 格式: {国家名称: {"language_name": "语言名称", "language_code": "ISO 639-1 代码"}}
+COUNTRY_LANGUAGE_MAP: Dict[str, Dict[str, str]] = {
+    "Vietnam": {
+        "language_name": "Vietnamese",
+        "language_code": "vi",
+    },
+    "Thailand": {
+        "language_name": "Thai",
+        "language_code": "th",
+    },
+    "Indonesia": {
+        "language_name": "Indonesian",
+        "language_code": "id",
+    },
+    "Malaysia": {
+        "language_name": "Malay",
+        "language_code": "ms",
+    },
+    "Philippines": {
+        "language_name": "Filipino",
+        "language_code": "tl",
+    },
+    "Singapore": {
+        "language_name": "English",
+        "language_code": "en",
+    },
+    "India": {
+        "language_name": "Hindi",
+        "language_code": "hi",
+    },
+    "Japan": {
+        "language_name": "Japanese",
+        "language_code": "ja",
+    },
+    "South Korea": {
+        "language_name": "Korean",
+        "language_code": "ko",
+    },
+    "China": {
+        "language_name": "Chinese",
+        "language_code": "zh",
+    },
+    "Taiwan": {
+        "language_name": "Traditional Chinese",
+        "language_code": "zh-TW",
+    },
+    "Brazil": {
+        "language_name": "Portuguese",
+        "language_code": "pt",
+    },
+    "Mexico": {
+        "language_name": "Spanish",
+        "language_code": "es",
+    },
+    "Spain": {
+        "language_name": "Spanish",
+        "language_code": "es",
+    },
+    "France": {
+        "language_name": "French",
+        "language_code": "fr",
+    },
+    "Germany": {
+        "language_name": "German",
+        "language_code": "de",
+    },
+    "Italy": {
+        "language_name": "Italian",
+        "language_code": "it",
+    },
+    "United Kingdom": {
+        "language_name": "English",
+        "language_code": "en",
+    },
+    "United States": {
+        "language_name": "English",
+        "language_code": "en",
+    },
+    "Canada": {
+        "language_name": "English",
+        "language_code": "en",
+    },
+    "Australia": {
+        "language_name": "English",
+        "language_code": "en",
+    },
+}
+
+
+def get_language_config(country_name: str) -> Dict[str, str]:
+    """
+    根据国家名称获取对应的语言配置
+
+    Args:
+        country_name: 国家名称（如 "Vietnam", "Thailand"）
+
+    Returns:
+        包含 language_name 和 language_code 的字典
+        如果国家不存在，返回越南的默认配置
+
+    Example:
+        >>> config = get_language_config("Vietnam")
+        >>> print(config)
+        {'language_name': 'Vietnamese', 'language_code': 'vi'}
+    """
+    return COUNTRY_LANGUAGE_MAP.get(
+        country_name,
+        COUNTRY_LANGUAGE_MAP["Vietnam"],  # 默认返回越南配置
+    )
 
 
 @lru_cache()

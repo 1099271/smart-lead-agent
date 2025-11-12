@@ -14,7 +14,10 @@ class Repository:
         self.db = db
 
     async def get_or_create_company(
-        self, name: str, local_name: Optional[str] = None
+        self,
+        name: str,
+        country: str,
+        local_name: Optional[str] = None,
     ) -> models.Company:
         """
         根据公司名称获取公司,如果不存在则创建（异步版本）
@@ -22,6 +25,7 @@ class Repository:
         Args:
             name: 公司英文名称
             local_name: 公司本地名称（可选）
+            country: 公司所在国家
 
         Returns:
             Company 对象
@@ -31,7 +35,7 @@ class Repository:
         )
         company = result.scalar_one_or_none()
         if not company:
-            company = models.Company(name=name, local_name=local_name)
+            company = models.Company(name=name, local_name=local_name, country=country)
             self.db.add(company)
             await self.db.commit()
             await self.db.refresh(company)
@@ -39,6 +43,11 @@ class Repository:
             # 如果公司已存在，但 local_name 为空且传入了 local_name，则更新
             if not company.local_name and local_name:
                 company.local_name = local_name
+                await self.db.commit()
+                await self.db.refresh(company)
+            # 如果公司已存在，但 country 为空或需要更新，则更新
+            if not company.country or (country and company.country != country):
+                company.country = country
                 await self.db.commit()
                 await self.db.refresh(company)
         return company

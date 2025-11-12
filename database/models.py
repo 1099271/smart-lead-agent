@@ -35,6 +35,9 @@ class Company(Base):
     name = Column(String(255), unique=True, nullable=False, index=True)
     local_name = Column(String(255))  # 公司本地名称
     domain = Column(String(255))  # 公司域名
+    country = Column(
+        String(100), nullable=False, index=True
+    )  # 公司所在国家（用于本地化）
     industry = Column(String(100))  # 行业
     positioning = Column(Text)  # 公司定位描述
     brief = Column(Text)  # 公司简要介绍/简报
@@ -182,7 +185,11 @@ class ProcessedFile(Base):
     __tablename__ = "processed_files"
 
     id = Column(Integer, primary_key=True, index=True)
-    file_path = Column(String(512), unique=True, nullable=False, index=True, comment="文件路径")
+    file_path = Column(
+        String(512), unique=True, nullable=False, index=True, comment="文件路径"
+    )
     file_size = Column(BigInteger, comment="文件大小(字节)")
-    processed_at = Column(TIMESTAMP, server_default=func.now(), index=True, comment="处理时间")
+    processed_at = Column(
+        TIMESTAMP, server_default=func.now(), index=True, comment="处理时间"
+    )
     records_count = Column(Integer, default=0, comment="导入的记录数")

@@ -9,8 +9,8 @@ from llm import get_llm
 from database.repository import Repository
 from database.models import Company, Contact
 from schemas.writer import EmailContent, GeneratedEmail as WriterGeneratedEmail
-from prompts.writer.WRITER_V2 import BRIEF_PROMPT
-from config import settings
+from prompts.writer.WRITER_V3 import BRIEF_PROMPT
+from config import settings, get_language_config
 from logs import logger, log_llm_request, log_llm_response
 
 
@@ -113,6 +113,12 @@ class WriterService:
         )
         has_screenshot_filters = "true" if settings.IMAGE_URL_FILTERS else "false"
 
+        # 从 company.country 获取本地化配置
+        country_name = company.country
+        language_config = get_language_config(country_name)
+        target_language_name = language_config["language_name"]
+        target_language_code = language_config["language_code"]
+
         prompt = BRIEF_PROMPT.format(
             # 公司信息
             company_en_name=company.name or "",
@@ -125,13 +131,15 @@ class WriterService:
             role_en=contact.role or "",
             department_cn=contact.department or "",
             email=contact.email or "",
+            # 本地化上下文（从 company.country 动态获取）
+            target_country_name=country_name,
+            target_language_name=target_language_name,
+            target_language_code=target_language_code,
             # 资产信息
             has_screenshot_customs_result=has_screenshot_customs_result,
             has_screenshot_filters=has_screenshot_filters,
             image_url_customs_result=settings.IMAGE_URL_CUSTOMS_RESULT or "",
             image_url_filters=settings.IMAGE_URL_FILTERS or "",
-            screenshot_mention_en="as shown in the attached screenshots (customs results & smart filters)",
-            screenshot_mention_vi="như thể hiện trong ảnh đính kèm (kết quả hải quan & bộ lọc thông minh)",
             # 产品信息
             trial_url=settings.TRIAL_URL,
             # 发送者信息
