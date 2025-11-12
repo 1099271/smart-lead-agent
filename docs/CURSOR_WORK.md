@@ -3826,6 +3826,7 @@ Method 'commit()' can't be called here; method 'commit()' is already in progress
 根据 JSON 数据结构，设计了两个表：
 
 **贸易记录表 (`trade_records`)**：
+
 - 存储所有贸易记录数据
 - 包含进口商、出口商、产品、贸易方式等完整信息
 - 字段映射：驼峰命名（JSON）→ 下划线命名（数据库）
@@ -3833,6 +3834,7 @@ Method 'commit()' can't be called here; method 'commit()' is already in progress
 - 添加了多个索引以优化查询性能
 
 **已处理文件记录表 (`processed_files`)**：
+
 - 记录已处理的文件信息
 - 包含文件路径、大小、处理时间、导入记录数
 - 使用唯一索引防止重复处理
@@ -3852,10 +3854,8 @@ Method 'commit()' can't be called here; method 'commit()' is already in progress
   - 支持日期字符串解析（ISO 格式）
   - 自动映射 JSON 字段名到数据库字段名
   - 支持批量提交优化性能
-  
 - `get_processed_file()`: 查询已处理文件记录
   - 用于检查文件是否已处理
-  
 - `create_processed_file()`: 创建已处理文件记录
   - 记录文件处理信息
 
@@ -3864,18 +3864,21 @@ Method 'commit()' can't be called here; method 'commit()' is already in progress
 完善了 `scripts/make_t_json.py`，实现以下功能：
 
 **核心功能**：
+
 - 扫描指定目录下的所有 `.json` 文件
 - 解析 JSON 文件，提取 `results.content` 数组
 - 批量导入数据到数据库
 - 记录已处理文件，支持增量导入
 
 **特性**：
+
 - 异步处理：使用 `AsyncSession` 和 `async/await`
 - 错误处理：单个文件失败不影响其他文件
 - 日志记录：详细的处理进度和错误信息
 - 命令行参数：支持指定目录和强制重新导入
 
 **使用方式**：
+
 ```bash
 # 使用默认目录
 uv run python scripts/make_t_json.py
@@ -3922,6 +3925,7 @@ JSON 文件
 ### 注意事项
 
 1. **数据库初始化**：需要先执行 SQL 脚本创建表结构
+
    ```bash
    mysql -u user -p database < database/sql/004_trade_records.sql
    mysql -u user -p database < database/sql/005_processed_files.sql
@@ -3997,7 +4001,7 @@ company = await repo.get_or_create_company(
 创建 `database/sql/006_add_company_local_name.sql`：
 
 ```sql
-ALTER TABLE companies 
+ALTER TABLE companies
 ADD COLUMN local_name VARCHAR(255) COMMENT '公司本地名称' AFTER name;
 ```
 
@@ -4038,6 +4042,7 @@ Repository.get_or_create_company(name, local_name)
 ### 注意事项
 
 1. **数据库迁移**：需要先执行 SQL 脚本添加字段
+
    ```bash
    mysql -u user -p database < database/sql/006_add_company_local_name.sql
    ```
@@ -4079,6 +4084,7 @@ graph TD
 直接查询 `trade_records` 表的 `importer` 和 `importer_en` 字段，无需复杂的 Repository 方法：
 
 **查询逻辑**：
+
 - 使用 SQLAlchemy 的 `select()` 直接查询 `TradeRecord.importer` 和 `TradeRecord.importer_en`
 - 过滤掉空值和空字符串
 - 使用 Python `set` 对 `(importer_en, importer)` 元组进行去重
@@ -4089,9 +4095,11 @@ graph TD
 创建了 `cli/batch_findkp.py` 文件，实现简化的批量处理命令：
 
 **命令参数**：
+
 - `--verbose/-v`: 显示详细日志（唯一参数）
 
 **处理流程**：
+
 1. 直接查询 `trade_records` 表，获取所有 `importer` 和 `importer_en` 字段
 2. 使用 Python `set` 对 `(importer_en, importer)` 元组进行去重
 3. 遍历每个去重后的公司：
@@ -4103,6 +4111,7 @@ graph TD
 #### 4. 命令注册
 
 在 `cli/main.py` 中注册新命令：
+
 ```python
 from cli.batch_findkp import batch_findkp
 cli.add_command(batch_findkp)
@@ -4150,5 +4159,494 @@ smart-lead batch-findkp --verbose
 1. **数据量**：如果 `trade_records` 表数据量很大，建议分批处理或添加限制
 2. **API 限流**：批量处理时注意 API 限流，可能需要手动控制处理速度
 3. **内存使用**：去重操作在内存中进行，如果数据量特别大，可能需要优化
+
+---
+
+---
+
+## 2025-11-12 16:54:22 - Writer 模块重构：支持新 Prompt 模板（HTML 输出格式）
+
+### 需求
+
+将 Writer 模块从旧的 `W_VN_PROMPT`（JSON 输出格式）迁移到新的 `W_VN_MAIL_GENERATOR`（HTML 输出格式），支持两阶段输出解析（Stage A: YAML + Stage B: HTML）和完整的 HTML 邮件内容生成。
+
+### 实现逻辑
+
+#### 1. 配置管理扩展 (`config.py`)
+
+在 `Settings` 类中添加了 Writer 模块所需的新配置项：
+
+- `SENDER_NAME`: 发送者姓名
+- `SENDER_TITLE_EN`: 发送者职位（英文）
+- `SENDER_COMPANY`: 发送者公司
+- `SENDER_EMAIL`: 发送者邮箱
+- `WHATSAPP_NUMBER`: WhatsApp 号码
+- `IMAGE_URL_CUSTOMS_RESULT`: 海关数据截图 URL
+- `IMAGE_URL_FILTERS`: 筛选器截图 URL
+- `TRIAL_URL`: 试用链接（默认值：`https://www.tendata.com/data/?email1110`）
+
+所有配置项都从 `.env` 文件读取，使用全局 `settings` 实例访问。
+
+#### 2. Schema 更新 (`schemas/writer.py`)
+
+更新了 `GeneratedEmail` 模型：
+
+- **移除字段**：
+
+  - `content_en`: 英文邮件正文
+  - `content_vn`: 越南语邮件正文
+  - `full_content`: 完整双语内容
+
+- **新增字段**：
+
+  - `html_content`: 完整的 HTML 邮件内容（直接用于邮件发送）
+
+- **保留字段**：
+  - `subject`: 邮件主题（从 HTML 中提取的越南语主题行）
+  - 其他联系人信息字段保持不变
+
+#### 3. Service 层重构 (`writer/service.py`)
+
+##### 3.1 导入更新
+
+- 从 `W_VN_PROMPT` 改为使用 `W_VN_MAIL_GENERATOR`
+- 使用动态导入方式处理 `.PY` 扩展名（通过 `exec()` 直接读取和执行文件内容）
+- 添加 `config` 导入以访问配置
+
+##### 3.2 新增 HTML 解析辅助方法
+
+- **`_separate_stages(content: str) -> tuple[str, str]`**：
+
+  - 分离 Stage A (YAML) 和 Stage B (HTML)
+  - 通过查找 `<!DOCTYPE html>` 或 `<html>` 标签定位 HTML 部分
+  - 返回 `(yaml_part, html_part)` 元组
+
+- **`_extract_subject_from_html(html: str) -> str`**：
+  - 从 HTML 中提取越南语主题行
+  - 使用正则表达式匹配：`<p[^>]*>Chủ đề:\s*([^<]+)</p>`
+  - 提取 `Chủ đề:` 后的主题文本
+
+##### 3.3 重写 `_format_prompt` 方法
+
+支持新 Prompt 所需的所有参数：
+
+- **公司信息**：`company_en_name`, `company_local_name`, `industry_cn`, `positioning_cn`, `brief_cn`
+- **联系人信息**：`full_name`, `role_en`, `department_cn`, `email`
+- **资产信息**：`has_screenshot_customs_result`, `has_screenshot_filters`, `image_url_customs_result`, `image_url_filters`, `screenshot_mention_en`, `screenshot_mention_vi`
+- **发送者信息**：`sender_name`, `sender_title_en`, `sender_company`, `sender_email`
+- **其他**：`trial_url`, `whatsapp_number`
+
+所有配置值从 `settings` 读取，空值使用空字符串作为默认值。
+
+##### 3.4 重写 `_parse_email_response` 方法
+
+处理两阶段输出（YAML + HTML）：
+
+1. **分离阶段**：使用 `_separate_stages()` 分离 YAML 和 HTML 部分
+2. **提取主题行**：使用 `_extract_subject_from_html()` 从 HTML 中提取越南语主题行
+3. **提取完整 HTML**：从 `<!DOCTYPE html>` 或 `<html>` 开始到 `</html>` 结束，提取完整的 HTML 内容
+4. **构建响应对象**：创建 `GeneratedEmail` 对象，包含 `subject` 和 `html_content`
+
+##### 3.5 移除不再需要的方法
+
+- 移除了 `_extract_json_from_text()` 方法（不再需要 JSON 解析）
+- 移除了 `json` 模块导入
+
+#### 4. 环境变量模板更新 (`.env.example`)
+
+添加了新配置项的示例值：
+
+```env
+# Writer 模块配置
+SENDER_NAME="Your Name"
+SENDER_TITLE_EN="Business Development Manager"
+SENDER_COMPANY="Tendata"
+SENDER_EMAIL="your_email@example.com"
+WHATSAPP_NUMBER="+84xxxxxxxxx"
+IMAGE_URL_CUSTOMS_RESULT="https://example.com/customs-result.png"
+IMAGE_URL_FILTERS="https://example.com/filters.png"
+TRIAL_URL="https://www.tendata.com/data/?email1110"
+```
+
+### 技术要点
+
+1. **动态导入处理**：由于 Prompt 文件使用 `.PY` 扩展名，使用 `exec()` 直接读取和执行文件内容，而不是标准的 Python 导入机制
+
+2. **两阶段输出解析**：
+
+   - Stage A (YAML)：包含受众选择信息（不保留在最终输出中）
+   - Stage B (HTML)：完整的 HTML 邮件内容（保留并直接使用）
+
+3. **HTML 主题行提取**：
+
+   - 从 HTML 的 `<p>` 标签中提取越南语主题行（`Chủ đề: ...`）
+   - 使用正则表达式进行模式匹配
+
+4. **字段映射**：
+
+   - 数据库字段直接使用，不进行翻译
+   - 空值统一处理为空字符串
+
+5. **向后兼容**：
+   - API 接口保持不变（`/writer/generate`）
+   - 响应模型结构更新，但接口调用方式不变
+
+### 修改文件清单
+
+1. ✅ `config.py` - 添加 Writer 模块配置项
+2. ✅ `schemas/writer.py` - 更新 `GeneratedEmail` 模型
+3. ✅ `writer/service.py` - 重构服务层（导入、格式化、解析）
+4. ✅ `.env.example` - 添加新配置项示例
+
+### 测试验证
+
+- ✅ 所有代码通过 lint 检查
+- ✅ 模块导入测试通过
+- ✅ 配置加载测试通过
+- ✅ 所有待办事项已完成
+
+### 注意事项
+
+1. **配置要求**：需要在 `.env` 文件中配置所有新添加的配置项，否则会使用空字符串作为默认值
+
+2. **HTML 格式**：生成的 HTML 内容需要完整保留，直接用于邮件发送服务（邮件发送服务稍后实现）
+
+3. **主题行提取**：如果 HTML 中无法提取主题行，会使用空字符串，但不会导致解析失败
+
+4. **两阶段输出**：Prompt 会先输出 Stage A (YAML)，再输出 Stage B (HTML)，解析时需要正确分离
+
+---
+
+---
+
+## 2025-11-12 16:59:50 - Writer 模块邮件发送功能集成
+
+### 需求
+
+在完成 Writer 模块重构后，集成邮件发送功能，使生成的 HTML 邮件可以直接发送给联系人。
+
+### 实现逻辑
+
+#### 1. 邮件发送服务 HTML 支持
+
+##### 1.1 SMTP 发送器更新 (`core/email/smtp_sender.py`)
+
+- 添加 HTML 内容检测逻辑
+- 当检测到 `<html>` 或 `<!DOCTYPE html>` 标签时，使用 `MIMEText(..., "html")` 而不是 `"plain"`
+- 保持向后兼容，纯文本内容仍然使用 `"plain"` 格式
+
+##### 1.2 ESP 发送器更新 (`core/email/esp_sender.py`)
+
+- 添加 HTML 内容检测逻辑
+- 当检测到 HTML 内容时，使用 `html_content=Content("text/html", ...)` 而不是 `plain_text_content`
+- 保持向后兼容，纯文本内容仍然使用 `plain_text_content`
+
+#### 2. Writer Service 邮件发送功能
+
+##### 2.1 添加转换方法 (`writer/service.py`)
+
+- **`_to_core_email(writer_email: WriterGeneratedEmail) -> CoreGeneratedEmail`**：
+  - 将 Writer 模块的 `GeneratedEmail`（包含 `html_content`）转换为邮件发送服务使用的 `core.schemas.GeneratedEmail`（包含 `body`）
+  - HTML 内容直接作为 `body` 字段传递
+
+##### 2.2 添加发送器工厂方法
+
+- **`_get_email_sender(sender_type: str) -> BaseEmailSender`**：
+  - 根据 `sender_type` 参数（'smtp' 或 'esp'）返回对应的发送器实例
+  - 支持 SMTP 和 ESP（SendGrid）两种发送方式
+
+##### 2.3 添加发送邮件方法
+
+- **`send_email(contact_id: int, sender_type: str = "smtp", db: AsyncSession = None) -> Dict[str, Any]`**：
+  - 根据联系人 ID 查询联系人信息
+  - 重新生成邮件（简化实现，实际场景中可以从数据库查询已生成的邮件）
+  - 转换为邮件发送服务格式
+  - 调用对应的发送器发送邮件
+  - 返回发送结果（成功/失败、消息 ID、错误信息）
+
+#### 3. Repository 扩展 (`database/repository.py`)
+
+- 添加 **`get_contact_by_id(contact_id: int) -> Optional[Contact]`** 方法：
+  - 根据联系人 ID 查询联系人
+  - 用于邮件发送功能中查询联系人信息
+
+#### 4. Schema 扩展 (`schemas/writer.py`)
+
+##### 4.1 发送邮件请求模型
+
+- **`SendEmailRequest`**：
+  - `contact_id`: 联系人 ID（对应已生成的邮件）
+  - `sender_type`: 发送器类型（'smtp' 或 'esp'，默认 'smtp'）
+  - 包含验证器，确保 `sender_type` 只能是 'smtp' 或 'esp'
+
+##### 4.2 发送邮件响应模型
+
+- **`SendEmailResponse`**：
+  - `contact_id`: 联系人 ID
+  - `contact_email`: 联系人邮箱
+  - `success`: 发送是否成功
+  - `message_id`: 消息 ID（ESP 支持，SMTP 为 None）
+  - `error`: 错误信息（如果失败）
+
+#### 5. Router 端点扩展 (`writer/router.py`)
+
+- 添加 **`POST /writer/send`** 端点：
+  - 接收 `SendEmailRequest` 请求
+  - 调用 `service.send_email()` 方法
+  - 返回 `SendEmailResponse` 响应
+  - 包含完整的错误处理和日志记录
+
+### 技术要点
+
+1. **HTML 内容自动检测**：
+
+   - 通过检测 `<html>` 或 `<!DOCTYPE html>` 标签判断是否为 HTML 内容
+   - 自动选择正确的 MIME 类型（text/html 或 text/plain）
+
+2. **发送器选择**：
+
+   - 支持 SMTP 和 ESP（SendGrid）两种发送方式
+   - 通过 `sender_type` 参数动态选择
+   - 发送器实例在每次发送时创建（可以优化为单例模式）
+
+3. **邮件生成策略**：
+
+   - 当前实现：每次发送时重新生成邮件（简化实现）
+   - 未来优化：可以从数据库查询已生成的邮件，避免重复生成
+
+4. **错误处理**：
+   - 联系人不存在：返回 404 错误
+   - 联系人没有邮箱：返回 404 错误
+   - 邮件生成失败：返回 500 错误
+   - 邮件发送失败：返回发送状态和错误信息
+
+### 修改文件清单
+
+1. ✅ `core/email/smtp_sender.py` - 添加 HTML 支持
+2. ✅ `core/email/esp_sender.py` - 添加 HTML 支持
+3. ✅ `writer/service.py` - 添加转换方法、发送器工厂、发送邮件方法
+4. ✅ `database/repository.py` - 添加 `get_contact_by_id` 方法
+5. ✅ `schemas/writer.py` - 添加 `SendEmailRequest` 和 `SendEmailResponse` 模型
+6. ✅ `writer/router.py` - 添加 `/writer/send` 端点
+
+### API 使用示例
+
+#### 生成邮件
+
+```bash
+POST /writer/generate
+{
+  "company_id": 1
+}
+```
+
+#### 发送邮件
+
+```bash
+POST /writer/send
+{
+  "contact_id": 123,
+  "sender_type": "smtp"  # 或 "esp"
+}
+```
+
+### 注意事项
+
+1. **配置要求**：
+
+   - SMTP 发送：需要配置 `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SENDER_EMAIL`
+   - ESP 发送：需要配置 `SENDGRID_API_KEY`, `ESP_SENDER_EMAIL`
+
+2. **邮件生成**：
+
+   - 当前实现每次发送时重新生成邮件，可能影响性能
+   - 建议后续优化：将生成的邮件存储到数据库，发送时直接查询
+
+3. **HTML 内容**：
+
+   - 邮件发送服务会自动检测 HTML 内容并选择正确的 MIME 类型
+   - 确保生成的 HTML 内容是完整的、有效的 HTML 文档
+
+4. **错误处理**：
+   - 发送失败不会抛出异常，而是返回包含错误信息的响应
+   - 客户端需要检查 `success` 字段判断是否发送成功
+
+---
+
+## 2024-12-19 - 调整 Writer 模块逻辑：移除发送功能，支持指定 LLM 类型，添加批量生成
+
+### 需求
+
+1. **移除发送逻辑**：Writer 模块不再负责邮件发送，只负责生成完整的邮件内容、标题和收件地址
+2. **支持指定 LLM 类型**：不同业务环节可以使用不同的 LLM 模型
+3. **添加批量生成功能**：在 CLI 中新增命令，查询所有有邮箱的联系人（去重），批量生成邮件
+
+### 实现逻辑
+
+#### 1. 数据结构调整
+
+**新增 `EmailContent` 模型**：
+
+- `contact_id`: 联系人 ID
+- `contact_name`: 联系人姓名
+- `contact_email`: 收件地址（必需）
+- `contact_role`: 联系人职位
+- `subject`: 邮件主题
+- `html_content`: 完整的 HTML 邮件内容
+
+**移除发送相关模型**：
+
+- 移除 `SendEmailRequest` 和 `SendEmailResponse`
+- 保留 `GeneratedEmail` 用于兼容旧版本
+
+#### 2. Service 层调整
+
+**移除发送逻辑**：
+
+- 删除 `send_email()` 方法
+- 删除 `_get_email_sender()` 方法
+- 删除 `_to_core_email()` 方法
+- 移除对 `core.email` 模块的依赖
+
+**支持指定 LLM 类型**：
+
+- `WriterService.__init__()` 接受 `llm_model` 参数
+- `generate_emails()` 方法接受 `llm_model` 参数
+- 如果指定了 LLM 模型，在方法内部重新初始化 LLM 实例
+
+**新增批量生成方法**：
+
+- `generate_emails_for_all_contacts()`: 为所有有邮箱的联系人生成邮件
+- 调用 `repository.get_all_contacts_with_email()` 获取去重后的联系人列表
+- 按公司分组，获取公司信息
+- 并发生成邮件
+
+#### 3. Repository 层扩展
+
+**新增方法**：
+
+- `get_all_contacts_with_email()`: 查询所有有邮箱的联系人，按邮箱去重
+- 去重策略：保留置信度最高的联系人，如果置信度相同则保留最新的
+
+#### 4. Router 层调整
+
+**移除发送端点**：
+
+- 删除 `/writer/send` 端点
+
+**更新生成端点**：
+
+- `GenerateEmailRequest` 添加 `llm_model` 字段
+- 端点支持通过请求参数指定 LLM 模型类型
+
+#### 5. CLI 层调整
+
+**移除发送命令**：
+
+- 删除 `writer send` 命令
+
+**更新生成命令**：
+
+- `writer generate` 添加 `--llm-model` 参数
+
+**新增批量生成命令**：
+
+- `writer batch-generate`: 为所有有邮箱的联系人生成邮件
+- 支持 `--llm-model` 参数指定 LLM 类型
+- 显示前 10 条邮件，其余显示数量统计
+
+### 使用示例
+
+#### API 调用
+
+```bash
+# 生成邮件（使用默认 LLM）
+POST /writer/generate
+{
+  "company_id": 1
+}
+
+# 生成邮件（指定 LLM 模型）
+POST /writer/generate
+{
+  "company_id": 1,
+  "llm_model": "gpt-4o"
+}
+```
+
+#### CLI 调用
+
+```bash
+# 根据公司生成邮件
+smart-lead writer generate --company-id 1
+smart-lead writer generate --company-name "Apple Inc." --llm-model "gpt-4o"
+
+# 批量生成邮件（所有有邮箱的联系人）
+smart-lead writer batch-generate
+smart-lead writer batch-generate --llm-model "deepseek-chat" --verbose
+```
+
+### 修改文件清单
+
+1. ✅ `schemas/writer.py` - 添加 `EmailContent` 模型，移除发送相关模型，添加 `llm_model` 字段
+2. ✅ `writer/service.py` - 移除发送逻辑，支持指定 LLM 类型，添加批量生成方法
+3. ✅ `writer/router.py` - 移除 `/send` 端点，更新生成端点支持 LLM 参数
+4. ✅ `database/repository.py` - 添加 `get_all_contacts_with_email()` 方法
+5. ✅ `cli/writer.py` - 移除发送命令，更新生成命令，添加批量生成命令
+
+### 技术要点
+
+1. **LLM 模型指定**：
+
+   - 支持在初始化时指定模型：`WriterService(llm_model="gpt-4o")`
+   - 支持在方法调用时指定模型：`generate_emails(..., llm_model="gpt-4o")`
+   - 如果指定了模型，会在方法内部重新初始化 LLM 实例
+
+2. **邮箱去重策略**：
+
+   - 按邮箱小写去重
+   - 保留置信度最高的联系人
+   - 如果置信度相同，保留创建时间最新的
+
+3. **批量生成流程**：
+
+   ```
+   查询所有有邮箱的联系人（去重）
+   ↓
+   按公司分组，获取公司信息
+   ↓
+   并发生成邮件（每个联系人一个任务）
+   ↓
+   过滤有效结果，返回邮件列表
+   ```
+
+4. **数据结构设计**：
+   - `EmailContent` 包含完整的邮件信息（内容、标题、收件地址）
+   - 邮件发送由其他模块完成，Writer 模块只负责生成
+
+### 注意事项
+
+1. **LLM 模型选择**：
+
+   - 不同业务环节可以使用不同的 LLM 模型
+   - 如果不指定，使用默认配置（`settings.LLM_MODEL`）
+   - 支持的模型类型：`gpt-4o`, `deepseek-chat`, `glm-4` 等
+
+2. **邮箱去重**：
+
+   - 只处理有邮箱的联系人
+   - 去重基于邮箱地址（不区分大小写）
+   - 保留置信度最高的记录
+
+3. **批量生成性能**：
+
+   - 使用异步并发生成，提升性能
+   - 单个联系人失败不影响其他联系人
+   - 建议在生产环境中控制并发数量
+
+4. **邮件发送**：
+   - Writer 模块不再负责邮件发送
+   - 生成的邮件内容可以直接传递给其他发送模块
+   - `EmailContent` 包含发送所需的所有信息
 
 ---

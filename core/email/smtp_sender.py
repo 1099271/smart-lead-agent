@@ -51,8 +51,12 @@ class SMTPEmailSender(BaseEmailSender):
             msg["To"] = recipient_email
             msg["Subject"] = email_content.subject
 
-            # 添加邮件正文
-            msg.attach(MIMEText(email_content.body, "plain"))
+            # 添加邮件正文（支持 HTML 格式）
+            # 检测是否为 HTML 内容
+            if "<html>" in email_content.body or "<!DOCTYPE html>" in email_content.body:
+                msg.attach(MIMEText(email_content.body, "html"))
+            else:
+                msg.attach(MIMEText(email_content.body, "plain"))
 
             # 连接SMTP服务器并发送邮件
             with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:

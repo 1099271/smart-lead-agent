@@ -1,85 +1,69 @@
 """Writer 业务逻辑服务"""
 
-import json
 import re
 import asyncio
+from pathlib import Path
 from typing import List, Dict, Optional, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from llm import get_llm
 from database.repository import Repository
 from database.models import Company, Contact
-from schemas.writer import GeneratedEmail
-from prompts.writer.W_VN_PROMPT import W_VN_PROMPT
+from schemas.writer import EmailContent, GeneratedEmail as WriterGeneratedEmail
+from prompts.writer.VN_MAIL_GENERATOR import W_VN_MAIL_GENERATOR
+from config import settings
 from logs import logger, log_llm_request, log_llm_response
 
 
 class WriterService:
     """Writer 服务类，负责生成营销邮件（异步版本）"""
 
-    def __init__(self):
-        # 使用统一的 LLM 工厂函数
-        self.llm = get_llm()
-
-    def _extract_json_from_text(self, text: str) -> Optional[str]:
+    def __init__(self, llm_model: Optional[str] = None):
         """
-        从文本中提取 JSON 内容，处理被 markdown 代码块包裹的情况
-        复用 FindKP 的逻辑
+        初始化 Writer 服务
 
         Args:
-            text: 可能包含 JSON 的文本
+            llm_model: 指定 LLM 模型类型（如 "gpt-4o", "deepseek-chat"），
+                       如果为 None 则使用默认配置
+        """
+        # 使用统一的 LLM 工厂函数，支持指定模型类型
+        self.llm = get_llm(model=llm_model)
+
+    def _separate_stages(self, content: str) -> tuple[str, str]:
+        """
+        分离 Stage A (YAML) 和 Stage B (HTML)
+
+        Args:
+            content: LLM 返回的完整内容
 
         Returns:
-            提取出的 JSON 字符串，如果未找到则返回 None
+            (yaml_part, html_part) 元组
         """
-        if not text or not text.strip():
-            return None
+        html_start = content.find("<!DOCTYPE html>")
+        if html_start == -1:
+            html_start = content.find("<html>")
 
-        # 策略1: 提取 markdown 代码块中的 JSON
-        code_block_patterns = [
-            r"```json\s*\n(.*?)\n```",  # ```json ... ```
-            r"```\s*\n(.*?)\n```",  # ``` ... ```
-        ]
+        if html_start != -1:
+            yaml_part = content[:html_start].strip()
+            html_part = content[html_start:].strip()
+            return yaml_part, html_part
+        return "", content
 
-        for pattern in code_block_patterns:
-            matches = re.findall(pattern, text, re.DOTALL)
-            for match in matches:
-                cleaned = match.strip()
-                if cleaned:
-                    try:
-                        # 验证是否是有效的 JSON
-                        json.loads(cleaned)
-                        return cleaned
-                    except json.JSONDecodeError:
-                        continue
+    def _extract_subject_from_html(self, html: str) -> str:
+        """
+        从 HTML 中提取越南语主题行
 
-        # 策略2: 查找 JSON 对象 {}
-        start_idx = text.find("{")
-        if start_idx != -1:
-            depth = 0
-            for i in range(start_idx, len(text)):
-                if text[i] == "{":
-                    depth += 1
-                elif text[i] == "}":
-                    depth -= 1
-                    if depth == 0:
-                        candidate = text[start_idx : i + 1]
-                        try:
-                            json.loads(candidate)
-                            return candidate
-                        except json.JSONDecodeError:
-                            pass
-                        break
+        Args:
+            html: HTML 内容
 
-        # 策略3: 尝试直接解析整个文本
-        cleaned_text = text.strip()
-        if cleaned_text:
-            try:
-                json.loads(cleaned_text)
-                return cleaned_text
-            except json.JSONDecodeError:
-                pass
-
-        return None
+        Returns:
+            提取的主题行，如果未找到则返回空字符串
+        """
+        # 查找越南语主题行：<p style="font-weight: bold; color: #0056b3;">Chủ đề: [VI Subject]</p>
+        pattern = r"<p[^>]*>Chủ đề:\s*([^<]+)</p>"
+        match = re.search(pattern, html, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+        return ""
 
     def _deduplicate_contacts(self, contacts: List[Contact]) -> List[Contact]:
         """
@@ -126,79 +110,102 @@ class WriterService:
 
         Returns:
             格式化后的 Prompt 字符串
-
-        注意：W_VN_PROMPT 模板已经包含了 JSON 格式要求，无需重复添加
         """
-        prompt = W_VN_PROMPT.format(
+        # 判断是否有截图
+        has_screenshot_customs_result = (
+            "true" if settings.IMAGE_URL_CUSTOMS_RESULT else "false"
+        )
+        has_screenshot_filters = "true" if settings.IMAGE_URL_FILTERS else "false"
+
+        prompt = W_VN_MAIL_GENERATOR.format(
+            # 公司信息
             company_en_name=company.name or "",
             company_local_name=company.local_name or "",
-            industry=company.industry or "",
-            positioning=company.positioning or "",
-            brief=company.brief or "",
+            industry_cn=company.industry or "",
+            positioning_cn=company.positioning or "",
+            brief_cn=company.brief or "",
+            # 联系人信息
             full_name=contact.full_name or "",
-            role=contact.role or "",
+            role_en=contact.role or "",
+            department_cn=contact.department or "",
+            email=contact.email or "",
+            # 资产信息
+            has_screenshot_customs_result=has_screenshot_customs_result,
+            has_screenshot_filters=has_screenshot_filters,
+            image_url_customs_result=settings.IMAGE_URL_CUSTOMS_RESULT or "",
+            image_url_filters=settings.IMAGE_URL_FILTERS or "",
+            screenshot_mention_en="as shown in the attached screenshots (customs results & smart filters)",
+            screenshot_mention_vi="như thể hiện trong ảnh đính kèm (kết quả hải quan & bộ lọc thông minh)",
+            # 产品信息
+            trial_url=settings.TRIAL_URL,
+            # 发送者信息
+            sender_name=settings.SENDER_NAME or "",
+            sender_title_en=settings.SENDER_TITLE_EN or "",
+            sender_company=settings.SENDER_COMPANY or "",
+            sender_email=settings.SENDER_EMAIL or "",
+            # 其他
+            whatsapp_number=settings.WHATSAPP_NUMBER or "",
         )
 
         return prompt
 
     def _parse_email_response(
         self, content: str, contact: Contact
-    ) -> Optional[GeneratedEmail]:
+    ) -> Optional[EmailContent]:
         """
-        解析 LLM 响应，提取邮件内容
+        解析 LLM 响应，提取邮件内容（处理两阶段输出：YAML + HTML）
 
         Args:
-            content: LLM 返回的内容
+            content: LLM 返回的内容（包含 Stage A YAML 和 Stage B HTML）
             contact: 联系人对象
 
         Returns:
-            GeneratedEmail 对象，如果解析失败则返回 None
+            EmailContent 对象，如果解析失败则返回 None
         """
         try:
-            # 提取 JSON
-            json_str = self._extract_json_from_text(content)
-            if not json_str:
-                logger.warning(f"无法从 LLM 响应中提取 JSON: {content[:200]}")
+            # 分离 Stage A (YAML) 和 Stage B (HTML)
+            yaml_part, html_part = self._separate_stages(content)
+
+            if not html_part:
+                logger.warning(f"无法从 LLM 响应中提取 HTML 内容: {content[:200]}")
                 return None
 
-            # 解析 JSON
-            email_data = json.loads(json_str)
+            # 从 HTML 中提取主题行（越南语）
+            subject = self._extract_subject_from_html(html_part)
 
-            subject = email_data.get("subject", "")
-            content_en = email_data.get("content_en", "")
-            content_vn = email_data.get("content_vn", "")
+            if not subject:
+                logger.warning(f"无法从 HTML 中提取主题行: {html_part[:200]}")
 
-            # 组合完整内容（英文 + 越南语）
-            full_content = ""
-            if content_en:
-                full_content += content_en
-            if content_vn:
-                if full_content:
-                    full_content += "\n\n---\n\n"
-                full_content += content_vn
+            # 提取完整 HTML 内容（从 <!DOCTYPE html> 或 <html> 开始到 </html> 结束）
+            html_start = html_part.find("<!DOCTYPE html>")
+            if html_start == -1:
+                html_start = html_part.find("<html>")
 
-            return GeneratedEmail(
+            html_end = html_part.rfind("</html>")
+            if html_start != -1 and html_end != -1:
+                html_content = html_part[html_start : html_end + 7]  # +7 包含 </html>
+            else:
+                # 如果没有找到完整的 HTML 标签，使用整个 html_part
+                html_content = html_part
+
+            # 返回新的 EmailContent 格式
+            return EmailContent(
                 contact_id=contact.id,
                 contact_name=contact.full_name,
-                contact_email=contact.email,
+                contact_email=contact.email or "",  # 确保不为 None
                 contact_role=contact.role,
                 subject=subject,
-                content_en=content_en,
-                content_vn=content_vn,
-                full_content=full_content,
+                html_content=html_content,
             )
 
-        except json.JSONDecodeError as e:
-            logger.error(f"解析邮件 JSON 失败: {e}")
-            logger.debug(f"原始响应内容: {content[:500]}")
-            return None
         except Exception as e:
             logger.error(f"解析邮件响应失败: {e}", exc_info=True)
+            logger.debug(f"原始响应内容: {content[:500]}")
             return None
 
     async def _generate_email_for_contact(
         self, company: Company, contact: Contact
-    ) -> Optional[GeneratedEmail]:
+    ) -> Optional[EmailContent]:
         """
         为单个联系人生成邮件
 
@@ -207,8 +214,13 @@ class WriterService:
             contact: 联系人对象
 
         Returns:
-            GeneratedEmail 对象，如果生成失败则返回 None
+            EmailContent 对象，如果生成失败则返回 None
         """
+        # 确保联系人有邮箱
+        if not contact.email:
+            logger.warning(f"联系人 {contact.id} 没有邮箱地址，跳过生成")
+            return None
+
         prompt = self._format_prompt(company, contact)
 
         try:
@@ -256,6 +268,7 @@ class WriterService:
         company_id: Optional[int] = None,
         company_name: Optional[str] = None,
         db: AsyncSession = None,
+        llm_model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         生成邮件主方法
@@ -264,6 +277,7 @@ class WriterService:
             company_id: 公司ID（可选）
             company_name: 公司名称（可选）
             db: 数据库会话
+            llm_model: 指定 LLM 模型类型（可选）
 
         Returns:
             包含公司信息和邮件列表的字典
@@ -273,6 +287,10 @@ class WriterService:
         """
         if not db:
             raise ValueError("数据库会话不能为空")
+
+        # 如果指定了 LLM 模型，重新初始化服务
+        if llm_model:
+            self.llm = get_llm(model=llm_model)
 
         repository = Repository(db)
 
@@ -334,5 +352,86 @@ class WriterService:
         return {
             "company_id": company.id,
             "company_name": company.name,
+            "emails": emails,
+        }
+
+    async def generate_emails_for_all_contacts(
+        self,
+        db: AsyncSession,
+        llm_model: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        为所有有邮箱的联系人生成邮件（按邮箱去重）
+
+        Args:
+            db: 数据库会话
+            llm_model: 指定 LLM 模型类型（可选）
+
+        Returns:
+            包含邮件列表的字典
+        """
+        if not db:
+            raise ValueError("数据库会话不能为空")
+
+        # 如果指定了 LLM 模型，重新初始化服务
+        if llm_model:
+            self.llm = get_llm(model=llm_model)
+
+        repository = Repository(db)
+
+        # 查询所有有邮箱的联系人（去重）
+        contacts = await repository.get_all_contacts_with_email()
+        logger.info(f"找到 {len(contacts)} 个有邮箱的联系人（已去重）")
+
+        if not contacts:
+            logger.warning("没有找到有邮箱的联系人")
+            return {
+                "total_contacts": 0,
+                "emails": [],
+            }
+
+        # 按公司分组，以便获取公司信息
+        company_map: Dict[int, Company] = {}
+        contact_company_map: Dict[int, int] = {}  # contact_id -> company_id
+
+        for contact in contacts:
+            if contact.company_id not in company_map:
+                company = await repository.get_company_by_id(contact.company_id)
+                if company:
+                    company_map[contact.company_id] = company
+            contact_company_map[contact.id] = contact.company_id
+
+        # 并发生成邮件
+        tasks = []
+        for contact in contacts:
+            company = company_map.get(contact.company_id)
+            if company:
+                tasks.append(self._generate_email_for_contact(company, contact))
+            else:
+                logger.warning(
+                    f"联系人 {contact.id} 的公司 {contact.company_id} 不存在，跳过"
+                )
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 过滤有效结果
+        emails = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(
+                    f"生成邮件时发生异常: {result}",
+                    exc_info=True,
+                )
+            elif result is not None:
+                emails.append(result)
+            else:
+                logger.warning(
+                    f"联系人 {contacts[i].id} ({contacts[i].email}) 的邮件生成失败"
+                )
+
+        logger.info(f"成功为 {len(emails)}/{len(contacts)} 个联系人生成邮件")
+
+        return {
+            "total_contacts": len(contacts),
             "emails": emails,
         }

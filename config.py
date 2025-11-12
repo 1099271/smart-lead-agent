@@ -42,6 +42,16 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "deepseek-chat"
     LLM_TEMPERATURE: float = 0.0
 
+    # Writer 模块配置
+    SENDER_NAME: str = ""  # 发送者姓名
+    SENDER_TITLE_EN: str = ""  # 发送者职位（英文）
+    SENDER_COMPANY: str = ""  # 发送者公司
+    SENDER_EMAIL: str = ""  # 发送者邮箱（复用邮件配置中的 SENDER_EMAIL）
+    WHATSAPP_NUMBER: str = ""  # WhatsApp 号码
+    IMAGE_URL_CUSTOMS_RESULT: str = ""  # 海关数据截图 URL
+    IMAGE_URL_FILTERS: str = ""  # 筛选器截图 URL
+    TRIAL_URL: str = "https://www.tendata.com/data/?email1110"  # 试用链接
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
