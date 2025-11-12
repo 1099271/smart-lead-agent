@@ -10,6 +10,7 @@ W_VN_MAIL_GENERATOR = """
       <goal>两阶段稳定生成：先受众判定与结构化简报，再按硬约束生成双语邮件。</goal>
       <goal>高容错性：稳健处理 NULL、无意义数据，并兼容已知的中/英双语信号词。</goal>
       <goal>突出痛点-解法对齐，避免浮夸与幻觉。</goal>
+      <goal>最终输出为可直接使用的HTML邮件内容，并嵌入产品截图。</goal>
     </goals>
     <rules>
       <rule>禁止编造事实；信息不足时使用「假设性/条件式」表述，并显式标注。</rule>
@@ -31,6 +32,14 @@ W_VN_MAIL_GENERATOR = """
       <role_en>{role_en}</role_en>
       <department_cn>{department_cn}</department_cn>
     </contact>
+    <assets>
+      <has_screenshot_customs_result>true</has_screenshot_customs_result>
+      <has_screenshot_filters>true</has_screenshot_filters>
+      <image_url_customs_result>{image_url_customs_result}</image_url_customs_result>
+      <image_url_filters>{image_url_filters}</image_url_filters>
+      <screenshot_mention_en>as shown in the attached screenshots (customs results &amp; smart filters)</screenshot_mention_en>
+      <screenshot_mention_vi>như thể hiện trong ảnh đính kèm (kết quả hải quan &amp; bộ lọc thông minh)</screenshot_mention_vi>
+    </assets>
     <product>
       <trial_url>https://www.tendata.com/data/?email1110</trial_url>
     </product>
@@ -192,32 +201,93 @@ assumptions:
   </generationConstraints>
 
   <outputFormat>
-    <stageOrder>先输出阶段A YAML，再输出阶段B邮件正文</stageOrder>
-    <mailSkeleton><![CDATA[
-[EN Subject]
-[VI Subject]
+    <stageOrder>先输出阶段A YAML，再输出阶段B HTML邮件正文</stageOrder>
+    
+    <mailSkeleton type="html"><![CDATA[
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>[EN Subject]</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f4f4f4; color: #333; }
+        .container { background-color: #ffffff; margin: 0 auto; padding: 20px 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); max-width: 600px; }
+        h1, h2, h3 { color: #0056b3; }
+        p { line-height: 1.6; margin-bottom: 10px; }
+        .footer { font-size: 0.8em; color: #666; margin-top: 30px; border-top: 1px solid #eee; padding-top: 15px; }
+        ul { margin-bottom: 10px; padding-left: 20px; }
+        li { margin-bottom: 5px; }
+        a { color: #007bff; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .signature-block { margin-top: 20px; font-size: 0.9em; line-height: 1.4; }
+        .signature-block strong { display: block; margin-bottom: 5px; }
+        .image-container { text-align: center; margin: 20px 0; }
+        .image-container img { max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; display: block; margin: 10px auto; }
+        .separator { border-top: 1px dashed #ccc; margin: 30px 0; } /* 用于分隔英越语 */
+    </style>
+</head>
+<body>
+    <div class="container">
+        <p style="font-weight: bold; color: #0056b3;">Subject: [EN Subject]</p>
+        
+        <p>[Generated Salutation (from salutationAndCourtesy logic)]</p>
 
-[Generated Salutation (from salutationAndCourtesy logic)]
-<EN R 段>
-<VI R 段>
+        <p><EN R 段></p>
 
-<EN V 段（可含 1–2 bullet）>
-<VI V 段（可含 1–2 bullet）>
+        <p><EN V 段（可含 1–2 bullet）></p>
 
-<EN R 段（含 3–4 bullet；对齐模块；自然提及截图）>
-<VI R 段（含 3–4 bullet；对齐模块；自然提及截图）>
+        <p><EN R 段（含 3–4 bullet；对齐模块；自然提及截图）></p>
 
-<EN A 段（软CTA + {trial_url}）>
-<VI A 段（软CTA + {trial_url}）>
+        <div class="image-container">
+            <p style="font-size: 0.9em; color: #555;">(Customs Results Sample)</p>
+            <img src="{image_url_customs_result}" alt="Customs Results Screenshot">
+            <p style="font-size: 0.9em; color: #555;">(Smart Filters Sample)</p>
+            <img src="{image_url_filters}" alt="Smart Filters Screenshot">
+        </div>
 
-Best regards,
-{sender_name} | {sender_title_en}
-{sender_company} | {sender_email}
+        <p><EN A 段（软CTA + <a href="{trial_url}" target="_blank">{trial_url}</a> + 提供一个whatsapp号码和邮箱地址，并引导客户添加，这两个联系方式可以解决任何问题）></p>
 
-Trân trọng,
-{sender_name} | {sender_title_vi}
-{sender_company} | {sender_email}
-]]></mailSkeleton>
+        <p>Best regards,</p>
+        <div class="signature-block">
+            <strong>{sender_name}</strong>
+            <p>{sender_company}<br>
+            Whatsapp: {whatsapp_number}<br>
+            Email: <a href="mailto:{sender_email}">{sender_email}</a><br>
+            </p>
+        </div>
+
+        <div class="separator"></div>
+
+        <p style="font-weight: bold; color: #0056b3;">Chủ đề: [VI Subject]</p>
+        
+        <p>[Generated Salutation (from salutationAndCourtesy logic)]</p>
+
+        <p><VI R 段></p>
+
+        <p><VI V 段（可含 1–2 bullet）></p>
+
+        <p><VI R 段（含 3–4 bullet；对齐模块；自然提及截图）></p>
+        
+        <p><VI A 段（软CTA + <a href="{trial_url}" target="_blank">{trial_url}</a> + 提供一个whatsapp号码和邮箱地址，并引导客户添加，这两个联系方式可以解决任何问题）></p>
+
+        <p>Trân trọng,</p>
+        <div class="signature-block">
+            <strong>{sender_name}</strong>
+            <p>
+            {sender_company}<br>
+            Email: <a href="mailto:{sender_email}">{sender_email}</a><br>
+            Whatsapp: {whatsapp_number}<br>
+            Email: <a href="mailto:{sender_email}">{sender_email}</a></p>
+        </div>
+        
+        <div class="footer">
+            <p>This email was sent by {sender_company}.</p>
+            </div>
+    </div>
+</body>
+</html>
+    ]]></mailSkeleton>
   </outputFormat>
 
   <safetyAndHallucination>
