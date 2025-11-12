@@ -54,12 +54,23 @@ class ESPEmailSender(BaseEmailSender):
         """
         try:
             # 构建SendGrid邮件对象
-            message = Mail(
-                from_email=Email(self.sender_email),
-                to_emails=To(recipient_email),
-                subject=email_content.subject,
-                plain_text_content=Content("text/plain", email_content.body),
-            )
+            # 检测是否为 HTML 内容
+            is_html = "<html>" in email_content.body or "<!DOCTYPE html>" in email_content.body
+            
+            if is_html:
+                message = Mail(
+                    from_email=Email(self.sender_email),
+                    to_emails=To(recipient_email),
+                    subject=email_content.subject,
+                    html_content=Content("text/html", email_content.body),
+                )
+            else:
+                message = Mail(
+                    from_email=Email(self.sender_email),
+                    to_emails=To(recipient_email),
+                    subject=email_content.subject,
+                    plain_text_content=Content("text/plain", email_content.body),
+                )
 
             # 发送邮件
             response = self.client.send(message)

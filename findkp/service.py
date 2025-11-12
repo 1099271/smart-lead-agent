@@ -10,7 +10,10 @@ from database.repository import Repository
 from database.models import CompanyStatus, Company
 from schemas.contact import KPInfo, ContactsResponse, CompanyInfoResponse
 from core.search import SerperSearchProvider, GoogleSearchProvider
-from .prompts import EXTRACT_COMPANY_INFO_PROMPT, EXTRACT_CONTACTS_PROMPT
+from prompts.findkp.FINDKP_PROMPT import (
+    EXTRACT_COMPANY_INFO_PROMPT,
+    EXTRACT_CONTACTS_PROMPT,
+)
 from .search_strategy import SearchStrategy
 from .email_search_strategy import EmailSearchStrategy
 from .result_aggregator import ResultAggregator

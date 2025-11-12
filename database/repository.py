@@ -52,6 +52,15 @@ class Repository:
         )
         return result.scalar_one_or_none()
 
+    async def get_company_by_id(self, company_id: int) -> Optional[models.Company]:
+        """
+        根据公司ID获取公司（如果不存在则返回 None）
+        """
+        result = await self.db.execute(
+            select(models.Company).filter(models.Company.id == company_id)
+        )
+        return result.scalar_one_or_none()
+
     async def create_contact(
         self, contact_info: KPInfo, company_id: int
     ) -> models.Contact:
@@ -135,6 +144,15 @@ class Repository:
         )
         return result.scalars().all()
 
+    async def get_contact_by_id(self, contact_id: int) -> Optional[models.Contact]:
+        """
+        根据联系人ID获取联系人（如果不存在则返回 None）
+        """
+        result = await self.db.execute(
+            select(models.Contact).filter(models.Contact.id == contact_id)
+        )
+        return result.scalar_one_or_none()
+
     async def get_contact_by_email(self, email: str) -> Optional[models.Contact]:
         """
         根据邮箱地址查找联系人(注: 可能返回多个,这里只返回第一个)（异步版本）
@@ -143,6 +161,46 @@ class Repository:
             select(models.Contact).filter(models.Contact.email == email)
         )
         return result.scalar_one_or_none()
+
+    async def get_all_contacts_with_email(self) -> List[models.Contact]:
+        """
+        获取所有有邮箱的联系人（按邮箱去重，保留置信度最高的）
+
+        返回:
+            去重后的联系人列表（只包含有邮箱的联系人）
+        """
+        # 查询所有有邮箱的联系人
+        result = await self.db.execute(
+            select(models.Contact).filter(
+                models.Contact.email.isnot(None), models.Contact.email != ""
+            )
+        )
+        all_contacts = result.scalars().all()
+
+        # 按邮箱去重，保留置信度最高的
+        email_map: Dict[str, models.Contact] = {}
+        for contact in all_contacts:
+            if not contact.email:
+                continue
+
+            email_lower = contact.email.lower()
+            if email_lower not in email_map:
+                email_map[email_lower] = contact
+            else:
+                # 比较置信度，保留更高的
+                existing = email_map[email_lower]
+                existing_score = existing.confidence_score or 0.0
+                current_score = contact.confidence_score or 0.0
+
+                if current_score > existing_score:
+                    email_map[email_lower] = contact
+                elif current_score == existing_score:
+                    # 置信度相同，保留最新的
+                    if contact.created_at and existing.created_at:
+                        if contact.created_at > existing.created_at:
+                            email_map[email_lower] = contact
+
+        return list(email_map.values())
 
     async def update_company_public_emails(
         self, company_id: int, public_emails: List[str]
