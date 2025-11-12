@@ -52,6 +52,15 @@ class Repository:
         )
         return result.scalar_one_or_none()
 
+    async def get_company_by_id(self, company_id: int) -> Optional[models.Company]:
+        """
+        根据公司ID获取公司（如果不存在则返回 None）
+        """
+        result = await self.db.execute(
+            select(models.Company).filter(models.Company.id == company_id)
+        )
+        return result.scalar_one_or_none()
+
     async def create_contact(
         self, contact_info: KPInfo, company_id: int
     ) -> models.Contact:
