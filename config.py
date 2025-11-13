@@ -55,13 +55,13 @@ class Settings(BaseSettings):
 
     # MailManager 模块配置
     EMAIL_SENDER_TYPE: str = "gmail"  # 邮件发送器类型（gmail/resend/smtp，未来扩展）
-    GOOGLE_SERVICE_ACCOUNT_FILE: str = (
-        ""  # Service Account JSON 文件路径（Gmail 发送器使用）
+    # Gmail API OAuth 2.0 配置
+    GOOGLE_OAUTH2_CREDENTIALS_FILE: str = (
+        ""  # OAuth 2.0 客户端凭据文件路径（credentials.json）
     )
-    GOOGLE_WORKSPACE_USER_EMAIL: str = (
-        ""  # Google Workspace 用户邮箱（Gmail 发送器使用）
+    GOOGLE_OAUTH2_TOKEN_FILE: str = (
+        ""  # OAuth 2.0 令牌文件路径（token.json，用于存储用户的 access token 和 refresh token）
     )
-    GOOGLE_WORKSPACE_DOMAIN: str = ""  # Google Workspace 域名（Gmail 发送器使用）
     RESEND_API_KEY: str = ""  # Resend API Key（Resend 发送器使用）
     TRACKING_BASE_URL: str = ""  # 追踪服务器基础 URL
     TRACKING_ENABLED: bool = True  # 是否启用追踪

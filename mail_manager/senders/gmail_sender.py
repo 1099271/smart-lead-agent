@@ -2,10 +2,13 @@
 
 import asyncio
 import base64
+import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional
-from google.oauth2 import service_account
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -14,43 +17,99 @@ from ..email_sender import EmailSender, EmailSendException
 from config import settings
 from logs import logger
 
+# Gmail API 所需的作用域
+SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
+
 
 class GmailSender(EmailSender):
-    """Gmail API 邮件发送器"""
+    """Gmail API 邮件发送器
+
+    使用 OAuth 2.0 用户授权方式访问 Gmail API
+    """
 
     def __init__(self):
         """
         初始化 Gmail 发送器
 
-        使用 Service Account 认证，配置 Domain-wide Delegation
+        使用 OAuth 2.0 用户授权，需要 credentials.json 和 token.json 文件
         """
-        if not settings.GOOGLE_SERVICE_ACCOUNT_FILE:
-            raise ValueError("GOOGLE_SERVICE_ACCOUNT_FILE 配置项未设置")
+        if not settings.GOOGLE_OAUTH2_CREDENTIALS_FILE:
+            raise ValueError("GOOGLE_OAUTH2_CREDENTIALS_FILE 配置项未设置")
 
-        if not settings.GOOGLE_WORKSPACE_USER_EMAIL:
-            raise ValueError("GOOGLE_WORKSPACE_USER_EMAIL 配置项未设置")
+        if not settings.GOOGLE_OAUTH2_TOKEN_FILE:
+            raise ValueError("GOOGLE_OAUTH2_TOKEN_FILE 配置项未设置")
 
         try:
-            # 加载 Service Account 凭据
-            self.credentials = service_account.Credentials.from_service_account_file(
-                settings.GOOGLE_SERVICE_ACCOUNT_FILE,
-                scopes=["https://www.googleapis.com/auth/gmail.send"],
-            )
-
-            # 使用 Domain-wide Delegation
-            self.delegated_credentials = self.credentials.with_subject(
-                settings.GOOGLE_WORKSPACE_USER_EMAIL
-            )
+            # 获取或刷新 OAuth 2.0 凭据
+            self.credentials = self._get_credentials()
 
             # 构建 Gmail API 服务
-            self.service = build("gmail", "v1", credentials=self.delegated_credentials)
+            self.service = build("gmail", "v1", credentials=self.credentials)
 
-            logger.info(
-                f"Gmail 发送器初始化成功，用户: {settings.GOOGLE_WORKSPACE_USER_EMAIL}"
-            )
+            logger.info("Gmail 发送器初始化成功（OAuth 2.0 用户授权）")
         except Exception as e:
             logger.error(f"Gmail 发送器初始化失败: {e}")
             raise EmailSendException(f"Gmail 发送器初始化失败: {str(e)}", e)
+
+    def _get_credentials(self) -> Credentials:
+        """
+        获取或刷新 OAuth 2.0 凭据
+
+        Returns:
+            Credentials: OAuth 2.0 凭据对象
+
+        Raises:
+            EmailSendException: 如果无法获取凭据
+        """
+        creds = None
+
+        # 如果 token.json 存在，加载已保存的凭据
+        if os.path.exists(settings.GOOGLE_OAUTH2_TOKEN_FILE):
+            try:
+                creds = Credentials.from_authorized_user_file(
+                    settings.GOOGLE_OAUTH2_TOKEN_FILE, SCOPES
+                )
+                logger.debug("已加载保存的 OAuth 2.0 凭据")
+            except Exception as e:
+                logger.warning(f"加载保存的凭据失败: {e}，将重新授权")
+
+        # 如果凭据不存在或已过期，进行刷新或重新授权
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                # 尝试刷新过期的凭据
+                try:
+                    logger.info("刷新过期的 OAuth 2.0 凭据")
+                    creds.refresh(Request())
+                    logger.info("凭据刷新成功")
+                except Exception as e:
+                    logger.warning(f"凭据刷新失败: {e}，需要重新授权")
+                    creds = None
+
+            if not creds:
+                # 需要重新授权
+                if not os.path.exists(settings.GOOGLE_OAUTH2_CREDENTIALS_FILE):
+                    raise FileNotFoundError(
+                        f"OAuth 2.0 凭据文件不存在: {settings.GOOGLE_OAUTH2_CREDENTIALS_FILE}"
+                    )
+
+                logger.info("启动 OAuth 2.0 授权流程")
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    settings.GOOGLE_OAUTH2_CREDENTIALS_FILE, SCOPES
+                )
+                # 在本地服务器上运行授权流程
+                creds = flow.run_local_server(port=0)
+
+            # 保存凭据供下次使用
+            try:
+                with open(settings.GOOGLE_OAUTH2_TOKEN_FILE, "w") as token:
+                    token.write(creds.to_json())
+                logger.info(
+                    f"OAuth 2.0 凭据已保存到: {settings.GOOGLE_OAUTH2_TOKEN_FILE}"
+                )
+            except Exception as e:
+                logger.warning(f"保存凭据失败: {e}，但将继续使用当前凭据")
+
+        return creds
 
     def _create_message(
         self,
@@ -164,4 +223,3 @@ class GmailSender(EmailSender):
             error_msg = f"邮件发送失败: {str(e)}"
             logger.error(f"邮件发送失败: {to_email}, {error_msg}")
             raise EmailSendException(error_msg, e)
-
