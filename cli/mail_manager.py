@@ -155,7 +155,7 @@ def send(
         logger.info(f"追踪ID: {result.tracking_id}")
         logger.info(f"状态: {result.status}")
         if result.gmail_message_id:
-            logger.info(f"Gmail消息ID: {result.gmail_message_id}")
+            logger.info(f"Mail消息ID: {result.gmail_message_id}")
         if result.sent_at:
             logger.info(f"发送时间: {result.sent_at}")
         if result.error:

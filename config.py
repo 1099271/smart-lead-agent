@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     TRIAL_URL: str = ""  # 试用链接
 
     # MailManager 模块配置
-    EMAIL_SENDER_TYPE: str = "gmail"  # 邮件发送器类型（gmail/resend/smtp，未来扩展）
+    EMAIL_SENDER_TYPE: str = "resend"  # 邮件发送器类型（gmail/resend/smtp，未来扩展）
     # Gmail API OAuth 2.0 配置
     GOOGLE_OAUTH2_CREDENTIALS_FILE: str = (
         ""  # OAuth 2.0 客户端凭据文件路径（credentials.json）
@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     TRACKING_ENABLED: bool = True  # 是否启用追踪
     EMAIL_SEND_RATE_LIMIT: int = 10  # 每分钟发送限制
     EMAIL_DAILY_LIMIT: int = 2000  # 每日发送上限（0=无限制）
+
+    EMAIL_SEND_EMAIL: str = ""  # 发送者邮箱
 
     model_config = {
         "env_file": ".env",

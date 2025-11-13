@@ -83,7 +83,7 @@ class MailManagerService:
                 html_content = embed_tracking_pixel(html_content, tracking_url)
 
             # 3. 获取发件人信息
-            from_email = request.from_email or settings.SENDER_EMAIL
+            from_email = request.from_email or settings.EMAIL_SEND_EMAIL
             from_name = request.from_name or settings.SENDER_NAME
 
             if not from_email:

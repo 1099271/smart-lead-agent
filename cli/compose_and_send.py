@@ -106,7 +106,7 @@ def compose_and_send(
                 logger.info(f"   邮件ID: {email_result['email_id']}")
                 logger.info(f"   状态: {email_result['status']}")
                 if email_result.get("gmail_message_id"):
-                    logger.info(f"   Gmail消息ID: {email_result['gmail_message_id']}")
+                    logger.info(f"   mail消息ID: {email_result['gmail_message_id']}")
                 if email_result.get("error"):
                     logger.error(f"   错误: {email_result['error']}")
                 logger.info("")
