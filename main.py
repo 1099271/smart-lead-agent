@@ -2,6 +2,7 @@ import logging
 from fastapi import FastAPI
 from findkp.router import router as findkp_router
 from writer.router import router as writer_router
+from mail_manager.router import router as mail_manager_router
 
 # 导入 logs 模块以初始化日志配置（包括 httpx 日志级别设置）
 import logs  # noqa: F401
@@ -25,6 +26,7 @@ app = FastAPI(
 # 注册路由
 app.include_router(findkp_router)
 app.include_router(writer_router)
+app.include_router(mail_manager_router)
 
 
 @app.get("/")
@@ -34,7 +36,7 @@ async def root():
         "service": "Smart Lead Agent API",
         "version": "2.0.0",
         "status": "operational",
-        "modules": ["FindKP", "MailManager (待实现)", "Writer"],
+        "modules": ["FindKP", "MailManager", "Writer"],
     }
 
 

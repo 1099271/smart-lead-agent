@@ -193,3 +193,90 @@ class ProcessedFile(Base):
         TIMESTAMP, server_default=func.now(), index=True, comment="处理时间"
     )
     records_count = Column(Integer, default=0, comment="导入的记录数")
+
+
+class EmailStatus(enum.Enum):
+    """邮件状态枚举"""
+
+    pending = "pending"  # 待发送
+    sending = "sending"  # 发送中
+    sent = "sent"  # 已发送
+    failed = "failed"  # 发送失败
+    bounced = "bounced"  # 退信
+
+
+class EmailTrackingEventType(enum.Enum):
+    """邮件追踪事件类型枚举"""
+
+    opened = "opened"  # 邮件被打开
+    clicked = "clicked"  # 链接被点击
+    replied = "replied"  # 邮件被回复
+
+
+class Email(Base):
+    """邮件记录表模型 - MailManager 板块"""
+
+    __tablename__ = "emails"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # 关联信息
+    contact_id = Column(Integer, ForeignKey("contacts.id"), nullable=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+
+    # 邮件基本信息
+    subject = Column(String(512), nullable=False)
+    html_content = Column(Text, nullable=False)  # HTML 内容（已嵌入追踪像素）
+    text_content = Column(Text)  # 纯文本内容（可选）
+
+    # 收件人信息
+    to_email = Column(String(255), nullable=False, index=True)
+    to_name = Column(String(255))  # 收件人姓名
+
+    # 发件人信息
+    from_email = Column(String(255), nullable=False)
+    from_name = Column(String(255))
+
+    # 追踪信息
+    tracking_id = Column(String(64), unique=True, nullable=False, index=True)
+    tracking_pixel_url = Column(String(512))  # 追踪像素URL
+
+    # 状态信息
+    status = Column(Enum(EmailStatus), default=EmailStatus.pending, index=True)
+    gmail_message_id = Column(String(255), unique=True)  # Gmail API 返回的消息ID
+    error_message = Column(Text)  # 错误信息（如果发送失败）
+
+    # 时间戳
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    sent_at = Column(TIMESTAMP)  # 实际发送时间
+    first_opened_at = Column(TIMESTAMP)  # 首次打开时间
+    updated_at = Column(
+        TIMESTAMP, server_default=func.now(), onupdate=func.current_timestamp()
+    )
+
+    # 关系
+    contact = relationship("Contact", backref="emails")
+    company = relationship("Company", backref="emails")
+    tracking_events = relationship("EmailTracking", back_populates="email")
+
+
+class EmailTracking(Base):
+    """邮件追踪事件表模型 - MailManager 板块"""
+
+    __tablename__ = "email_tracking"
+
+    id = Column(Integer, primary_key=True)
+    email_id = Column(Integer, ForeignKey("emails.id"), nullable=False, index=True)
+
+    # 事件类型
+    event_type = Column(Enum(EmailTrackingEventType), nullable=False, index=True)
+
+    # 追踪信息
+    ip_address = Column(String(45))  # IPv4 或 IPv6
+    user_agent = Column(String(512))  # 浏览器 User-Agent
+    referer = Column(String(512))  # 来源页面
+
+    # 时间戳
+    created_at = Column(TIMESTAMP, server_default=func.now(), index=True)
+
+    # 关系
+    email = relationship("Email", back_populates="tracking_events")

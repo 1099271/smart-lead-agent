@@ -53,6 +53,16 @@ class Settings(BaseSettings):
     IMAGE_URL_FILTERS: str = ""  # 筛选器截图 URL
     TRIAL_URL: str = "https://www.tendata.com/data/?email1110"  # 试用链接
 
+    # MailManager 模块配置
+    EMAIL_SENDER_TYPE: str = "gmail"  # 邮件发送器类型（gmail/smtp，未来扩展）
+    GOOGLE_SERVICE_ACCOUNT_FILE: str = ""  # Service Account JSON 文件路径（Gmail 发送器使用）
+    GOOGLE_WORKSPACE_USER_EMAIL: str = ""  # Google Workspace 用户邮箱（Gmail 发送器使用）
+    GOOGLE_WORKSPACE_DOMAIN: str = ""  # Google Workspace 域名（Gmail 发送器使用）
+    TRACKING_BASE_URL: str = ""  # 追踪服务器基础 URL
+    TRACKING_ENABLED: bool = True  # 是否启用追踪
+    EMAIL_SEND_RATE_LIMIT: int = 10  # 每分钟发送限制
+    EMAIL_DAILY_LIMIT: int = 2000  # 每日发送上限（0=无限制）
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

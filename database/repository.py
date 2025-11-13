@@ -472,3 +472,279 @@ class Repository:
         await self.db.commit()
         await self.db.refresh(processed_file)
         return processed_file
+
+    # ==================== MailManager 板块方法 ====================
+
+    async def create_email_record(
+        self,
+        contact_id: Optional[int],
+        company_id: Optional[int],
+        subject: str,
+        html_content: str,
+        text_content: Optional[str],
+        to_email: str,
+        to_name: Optional[str],
+        from_email: str,
+        from_name: Optional[str],
+        tracking_id: str,
+        tracking_pixel_url: Optional[str],
+        status: models.EmailStatus = models.EmailStatus.pending,
+    ) -> models.Email:
+        """
+        创建邮件记录
+
+        Args:
+            contact_id: 关联联系人ID（可选）
+            company_id: 关联公司ID（可选）
+            subject: 邮件主题
+            html_content: HTML 内容
+            text_content: 纯文本内容（可选）
+            to_email: 收件人邮箱
+            to_name: 收件人姓名（可选）
+            from_email: 发件人邮箱
+            from_name: 发件人姓名（可选）
+            tracking_id: 追踪ID
+            tracking_pixel_url: 追踪像素URL（可选）
+            status: 邮件状态（默认 pending）
+
+        Returns:
+            创建的 Email 实例
+        """
+        email = models.Email(
+            contact_id=contact_id,
+            company_id=company_id,
+            subject=subject,
+            html_content=html_content,
+            text_content=text_content,
+            to_email=to_email,
+            to_name=to_name,
+            from_email=from_email,
+            from_name=from_name,
+            tracking_id=tracking_id,
+            tracking_pixel_url=tracking_pixel_url,
+            status=status,
+        )
+        self.db.add(email)
+        await self.db.commit()
+        await self.db.refresh(email)
+        return email
+
+    async def get_email_by_id(self, email_id: int) -> Optional[models.Email]:
+        """
+        根据ID查询邮件
+
+        Args:
+            email_id: 邮件ID
+
+        Returns:
+            Email 实例，如果不存在则返回 None
+        """
+        result = await self.db.execute(
+            select(models.Email).filter(models.Email.id == email_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_email_by_tracking_id(
+        self, tracking_id: str
+    ) -> Optional[models.Email]:
+        """
+        根据追踪ID查询邮件
+
+        Args:
+            tracking_id: 追踪ID
+
+        Returns:
+            Email 实例，如果不存在则返回 None
+        """
+        result = await self.db.execute(
+            select(models.Email).filter(models.Email.tracking_id == tracking_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def update_email_status(
+        self,
+        email_id: int,
+        status: models.EmailStatus,
+        error_message: Optional[str] = None,
+    ) -> Optional[models.Email]:
+        """
+        更新邮件状态
+
+        Args:
+            email_id: 邮件ID
+            status: 新状态
+            error_message: 错误信息（可选）
+
+        Returns:
+            更新后的 Email 实例，如果不存在则返回 None
+        """
+        email = await self.get_email_by_id(email_id)
+        if not email:
+            return None
+
+        email.status = status
+        if error_message:
+            email.error_message = error_message
+
+        await self.db.commit()
+        await self.db.refresh(email)
+        return email
+
+    async def update_email_sent_info(
+        self, email_id: int, message_id: str, sent_at: datetime
+    ) -> Optional[models.Email]:
+        """
+        更新邮件发送信息
+
+        Args:
+            email_id: 邮件ID
+            message_id: Gmail API 返回的消息ID
+            sent_at: 发送时间
+
+        Returns:
+            更新后的 Email 实例，如果不存在则返回 None
+        """
+        email = await self.get_email_by_id(email_id)
+        if not email:
+            return None
+
+        email.gmail_message_id = message_id
+        email.sent_at = sent_at
+        email.status = models.EmailStatus.sent
+
+        await self.db.commit()
+        await self.db.refresh(email)
+        return email
+
+    async def update_email_first_opened_at(
+        self, email_id: int, opened_at: datetime
+    ) -> Optional[models.Email]:
+        """
+        更新邮件首次打开时间
+
+        Args:
+            email_id: 邮件ID
+            opened_at: 打开时间
+
+        Returns:
+            更新后的 Email 实例，如果不存在则返回 None
+        """
+        email = await self.get_email_by_id(email_id)
+        if not email:
+            return None
+
+        # 只在首次打开时更新
+        if not email.first_opened_at:
+            email.first_opened_at = opened_at
+
+        await self.db.commit()
+        await self.db.refresh(email)
+        return email
+
+    async def create_tracking_event(
+        self,
+        email_id: int,
+        event_type: models.EmailTrackingEventType,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+        referer: Optional[str] = None,
+    ) -> models.EmailTracking:
+        """
+        创建追踪事件
+
+        Args:
+            email_id: 邮件ID
+            event_type: 事件类型
+            ip_address: IP地址（可选）
+            user_agent: User-Agent（可选）
+            referer: 来源页面（可选）
+
+        Returns:
+            创建的 EmailTracking 实例
+        """
+        tracking_event = models.EmailTracking(
+            email_id=email_id,
+            event_type=event_type,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            referer=referer,
+        )
+        self.db.add(tracking_event)
+        await self.db.commit()
+        await self.db.refresh(tracking_event)
+        return tracking_event
+
+    async def get_email_tracking_events(
+        self, email_id: int
+    ) -> List[models.EmailTracking]:
+        """
+        查询邮件的追踪事件
+
+        Args:
+            email_id: 邮件ID
+
+        Returns:
+            追踪事件列表
+        """
+        result = await self.db.execute(
+            select(models.EmailTracking)
+            .filter(models.EmailTracking.email_id == email_id)
+            .order_by(models.EmailTracking.created_at)
+        )
+        return list(result.scalars().all())
+
+    async def get_emails_by_status(
+        self,
+        status: Optional[models.EmailStatus] = None,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> List[models.Email]:
+        """
+        根据状态查询邮件列表（支持分页）
+
+        Args:
+            status: 邮件状态（可选，None 表示查询所有状态）
+            limit: 每页数量
+            offset: 偏移量
+
+        Returns:
+            邮件列表
+        """
+        query = select(models.Email)
+        if status:
+            query = query.filter(models.Email.status == status)
+
+        query = (
+            query.order_by(models.Email.created_at.desc()).limit(limit).offset(offset)
+        )
+
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
+    async def get_daily_sent_count(self, date: Optional[datetime] = None) -> int:
+        """
+        获取指定日期的已发送邮件数量（用于限制检查）
+
+        Args:
+            date: 日期（可选，默认今天）
+
+        Returns:
+            已发送邮件数量
+        """
+        from sqlalchemy import func
+
+        if date is None:
+            date = datetime.now()
+
+        # 获取当天的开始和结束时间
+        start_of_day = datetime.combine(date.date(), datetime.min.time())
+        end_of_day = datetime.combine(date.date(), datetime.max.time())
+
+        result = await self.db.execute(
+            select(func.count(models.Email.id)).filter(
+                models.Email.status == models.EmailStatus.sent,
+                models.Email.sent_at >= start_of_day,
+                models.Email.sent_at <= end_of_day,
+            )
+        )
+        return result.scalar() or 0
