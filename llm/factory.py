@@ -14,60 +14,6 @@ from logs import logger
 class LLMRouter:
     """LLM 路由类，负责判断模型应该使用哪个提供商"""
 
-    # 国外模型列表（通过 OpenRouter）
-    OPENROUTER_MODELS = [
-        "gpt-",
-        "claude-",
-        "anthropic/",
-        "openai/",
-        "meta-llama/",
-        "google/",
-    ]
-
-    # 国内模型列表（直接调用）
-    DOMESTIC_MODELS = {
-        # DeepSeek 模型
-        "deepseek-chat": "deepseek",
-        "deepseek-reasoner": "deepseek",
-        # GLM（智谱AI）模型
-        "glm-4": "glm",
-        "glm-4-plus": "glm",
-        "glm-4-flash": "glm",
-        # Qwen（通义千问）模型
-        "qwen-turbo": "qwen",
-        "qwen-plus": "qwen",
-        "qwen-max": "qwen",
-        "qwen-7b-chat": "qwen",
-        "qwen-14b-chat": "qwen",
-        "qwen-72b-chat": "qwen",
-    }
-
-    @classmethod
-    def get_provider(cls, model: str) -> Tuple[str, str]:
-        """
-        根据模型名称判断使用的提供商和路由方式
-
-        Args:
-            model: 模型名称（如 "gpt-4o", "deepseek-chat"）
-
-        Returns:
-            tuple: (provider_type, provider_name)
-                - provider_type: "openrouter" | "direct"
-                - provider_name: "openai" | "deepseek" | "qwen" | "doubao" 等
-        """
-        # 先检查国内模型映射
-        if model in cls.DOMESTIC_MODELS:
-            return ("direct", cls.DOMESTIC_MODELS[model])
-
-        # 检查是否是国外模型（通过 OpenRouter）
-        for prefix in cls.OPENROUTER_MODELS:
-            if model.startswith(prefix):
-                return ("openrouter", "openai")  # OpenRouter 使用 OpenAI 兼容接口
-
-        # 默认使用 OpenRouter
-        logger.warning(f"模型 {model} 未匹配到明确的路由规则，默认使用 OpenRouter")
-        return ("openrouter", "openai")
-
 
 def get_llm(model: Optional[str] = None, temperature: Optional[float] = None, **kwargs):
     """
@@ -92,20 +38,12 @@ def get_llm(model: Optional[str] = None, temperature: Optional[float] = None, **
     model = model or settings.LLM_MODEL
     temperature = temperature if temperature is not None else settings.LLM_TEMPERATURE
 
-    # 判断路由
-    provider_type, provider_name = LLMRouter.get_provider(model)
-
-    logger.info(
-        f"创建 LLM 实例: model={model}, provider_type={provider_type}, "
-        f"provider_name={provider_name}"
-    )
-
-    if provider_type == "openrouter":
+    if model == "openrouter":
         return _create_openrouter_llm(model, temperature, **kwargs)
-    elif provider_type == "direct":
-        return _create_direct_llm(model, provider_name, temperature, **kwargs)
+    elif model in ("deepseek", "qwen", "glm"):
+        return _create_direct_llm(model, model, temperature, **kwargs)
     else:
-        raise ValueError(f"不支持的 provider_type: {provider_type}")
+        raise ValueError(f"不支持的 provider_type: {model}")
 
 
 def _create_openrouter_llm(model: str, temperature: float, **kwargs):
@@ -173,16 +111,16 @@ def _create_direct_llm(model: str, provider_name: str, temperature: float, **kwa
         ChatModel: LangChain ChatModel 实例
     """
     if provider_name == "deepseek":
-        return _create_deepseek_llm(model, temperature, **kwargs)
+        return _create_deepseek_llm(temperature, **kwargs)
     elif provider_name == "glm":
-        return _create_glm_llm(model, temperature, **kwargs)
+        return _create_glm_llm(temperature, **kwargs)
     elif provider_name == "qwen":
-        return _create_qwen_llm(model, temperature, **kwargs)
+        return _create_qwen_llm(temperature, **kwargs)
     else:
         raise ValueError(f"不支持的国内 API 提供商: {provider_name}")
 
 
-def _create_deepseek_llm(model: str, temperature: float, **kwargs):
+def _create_deepseek_llm(temperature: float, **kwargs):
     """
     创建 DeepSeek LLM 实例
 
@@ -201,18 +139,16 @@ def _create_deepseek_llm(model: str, temperature: float, **kwargs):
     if not settings.DEEPSEEK_API_KEY:
         raise ValueError("DeepSeek API Key 未配置。请设置 DEEPSEEK_API_KEY")
 
-    # 设置环境变量（langchain-deepseek 需要）
-    os.environ["DEEPSEEK_API_KEY"] = settings.DEEPSEEK_API_KEY
-
-    logger.debug(f"DeepSeek 配置: model={model}, provider=deepseek")
-
-    # 使用 langchain-deepseek
     return init_chat_model(
-        model=model, model_provider="deepseek", temperature=temperature, **kwargs
+        model="deepseek-chat",
+        model_provider="openai",
+        api_key=settings.DEEPSEEK_API_KEY,
+        temperature=temperature,
+        **kwargs,
     )
 
 
-def _create_glm_llm(model: str, temperature: float, **kwargs):
+def _create_glm_llm(temperature: float, **kwargs):
     """
     创建 GLM（智谱AI）LLM 实例（使用 Python SDK）
 
@@ -230,15 +166,13 @@ def _create_glm_llm(model: str, temperature: float, **kwargs):
     if not settings.GLM_API_KEY:
         raise ValueError("GLM API Key 未配置。请设置 GLM_API_KEY")
 
-    logger.debug(f"GLM 配置: model={model}, 使用 Python SDK (zhipuai)")
-
     # 使用智谱AI Python SDK
     return GLMLLMWrapper(
-        model=model, temperature=temperature, api_key=settings.GLM_API_KEY, **kwargs
+        model="glm-4.6", temperature=temperature, api_key=settings.GLM_API_KEY, **kwargs
     )
 
 
-def _create_qwen_llm(model: str, temperature: float, **kwargs):
+def _create_qwen_llm(temperature: float, **kwargs):
     """
     创建 Qwen（通义千问）LLM 实例（使用 OpenAI 兼容接口）
 
@@ -256,16 +190,9 @@ def _create_qwen_llm(model: str, temperature: float, **kwargs):
     if not settings.QWEN_API_KEY:
         raise ValueError("Qwen API Key 未配置。请设置 QWEN_API_KEY")
 
-    # 如果配置了 QWEN_MODEL，使用配置的模型名称，否则使用传入的 model
-    actual_model = settings.QWEN_MODEL or model
-
-    logger.debug(
-        f"Qwen 配置: model={actual_model}, base_url=https://dashscope.aliyuncs.com/compatible-mode/v1"
-    )
-
     # 使用 OpenAI 兼容接口，只需设置不同的 base_url
     return init_chat_model(
-        model=actual_model,
+        model="qwen-plus",
         model_provider="openai",  # 使用 OpenAI 兼容接口
         temperature=temperature,
         api_key=settings.QWEN_API_KEY,

@@ -46,7 +46,7 @@ class WriterService:
 
     def _extract_subject_from_html(self, html: str) -> str:
         """
-        从 HTML 中提取越南语主题行
+        从 HTML 中提取主题行（从 <title> 标签）
 
         Args:
             html: HTML 内容
@@ -54,11 +54,16 @@ class WriterService:
         Returns:
             提取的主题行，如果未找到则返回空字符串
         """
-        # 查找越南语主题行：<p style="font-weight: bold; color: #0056b3;">Chủ đề: [VI Subject]</p>
-        pattern = r"<p[^>]*>Chủ đề:\s*([^<]+)</p>"
-        match = re.search(pattern, html, re.IGNORECASE)
+        # 查找 <title> 标签内容：<title>...</title>
+        # 支持 title 标签可能有属性，如 <title lang="vi">...</title>
+        pattern = r"<title[^>]*>(.*?)</title>"
+        match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
         if match:
-            return match.group(1).strip()
+            # 提取内容并清理 HTML 实体和空白字符
+            title = match.group(1).strip()
+            # 移除可能的 HTML 实体（如 &nbsp;）和多余空白
+            title = re.sub(r"\s+", " ", title)
+            return title
         return ""
 
     def _deduplicate_contacts(self, contacts: List[Contact]) -> List[Contact]:
