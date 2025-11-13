@@ -2,7 +2,10 @@
 
 import asyncio
 import base64
+import json
 import os
+import sys
+
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional
@@ -14,6 +17,8 @@ from googleapiclient.errors import HttpError
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ..email_sender import EmailSender, EmailSendException
+from ..oauth2_manager import get_oauth2_manager
+from database.repository import Repository
 from config import settings
 from logs import logger
 
@@ -31,29 +36,65 @@ class GmailSender(EmailSender):
         """
         初始化 Gmail 发送器
 
-        使用 OAuth 2.0 用户授权，需要 credentials.json 和 token.json 文件
+        使用 OAuth 2.0 用户授权，需要 credentials.json 文件
+        Token 存储在数据库中，不再使用文件系统
+        注意：凭据采用延迟初始化，在第一次使用时才获取
         """
         if not settings.GOOGLE_OAUTH2_CREDENTIALS_FILE:
             raise ValueError("GOOGLE_OAUTH2_CREDENTIALS_FILE 配置项未设置")
 
-        if not settings.GOOGLE_OAUTH2_TOKEN_FILE:
-            raise ValueError("GOOGLE_OAUTH2_TOKEN_FILE 配置项未设置")
+        # 延迟初始化：凭据和服务在第一次使用时才初始化
+        self._credentials: Optional[Credentials] = None
+        self._service = None
+        self._initialized = False
+
+        logger.info("Gmail 发送器实例已创建（延迟初始化，token 存储在数据库）")
+
+    async def _ensure_initialized(self, db=None):
+        """
+        确保 Gmail 发送器已初始化（延迟初始化）
+
+        如果尚未初始化，则获取凭据并构建服务
+
+        Args:
+            db: 数据库会话（可选，用于 OAuth 2.0 授权流程）
+        """
+        if self._initialized:
+            return
 
         try:
             # 获取或刷新 OAuth 2.0 凭据
-            self.credentials = self._get_credentials()
+            self._credentials = await self._get_credentials_async(db=db)
 
             # 构建 Gmail API 服务
-            self.service = build("gmail", "v1", credentials=self.credentials)
+            self._service = build("gmail", "v1", credentials=self._credentials)
 
+            self._initialized = True
             logger.info("Gmail 发送器初始化成功（OAuth 2.0 用户授权）")
         except Exception as e:
             logger.error(f"Gmail 发送器初始化失败: {e}")
             raise EmailSendException(f"Gmail 发送器初始化失败: {str(e)}", e)
 
-    def _get_credentials(self) -> Credentials:
+    @property
+    def credentials(self) -> Credentials:
+        """获取凭据（同步访问，用于兼容性）"""
+        if not self._initialized:
+            raise RuntimeError("Gmail 发送器尚未初始化，请先调用 _ensure_initialized()")
+        return self._credentials
+
+    @property
+    def service(self):
+        """获取 Gmail API 服务（同步访问，用于兼容性）"""
+        if not self._initialized:
+            raise RuntimeError("Gmail 发送器尚未初始化，请先调用 _ensure_initialized()")
+        return self._service
+
+    async def _get_credentials_async(self, db=None) -> Credentials:
         """
-        获取或刷新 OAuth 2.0 凭据
+        获取或刷新 OAuth 2.0 凭据（异步版本）
+
+        Args:
+            db: 数据库会话（必需，用于从数据库读取 token）
 
         Returns:
             Credentials: OAuth 2.0 凭据对象
@@ -61,17 +102,22 @@ class GmailSender(EmailSender):
         Raises:
             EmailSendException: 如果无法获取凭据
         """
+        if not db:
+            raise ValueError("需要提供数据库会话以从数据库读取 token")
+
         creds = None
 
-        # 如果 token.json 存在，加载已保存的凭据
-        if os.path.exists(settings.GOOGLE_OAUTH2_TOKEN_FILE):
-            try:
-                creds = Credentials.from_authorized_user_file(
-                    settings.GOOGLE_OAUTH2_TOKEN_FILE, SCOPES
-                )
-                logger.debug("已加载保存的 OAuth 2.0 凭据")
-            except Exception as e:
-                logger.warning(f"加载保存的凭据失败: {e}，将重新授权")
+        # 从数据库读取已保存的 token
+        try:
+            repository = Repository(db)
+            token_json = await repository.get_oauth2_token(provider="gmail")
+            if token_json:
+                # 从 JSON 字符串创建凭据对象
+                token_dict = json.loads(token_json)
+                creds = Credentials.from_authorized_user_info(token_dict, SCOPES)
+                logger.debug("已从数据库加载保存的 OAuth 2.0 凭据")
+        except Exception as e:
+            logger.warning(f"从数据库加载保存的凭据失败: {e}，将重新授权")
 
         # 如果凭据不存在或已过期，进行刷新或重新授权
         if not creds or not creds.valid:
@@ -79,8 +125,17 @@ class GmailSender(EmailSender):
                 # 尝试刷新过期的凭据
                 try:
                     logger.info("刷新过期的 OAuth 2.0 凭据")
-                    creds.refresh(Request())
+                    # 刷新操作需要在同步上下文中执行
+                    await asyncio.to_thread(creds.refresh, Request())
                     logger.info("凭据刷新成功")
+                    # 刷新后立即保存到数据库
+                    if db:
+                        repository = Repository(db)
+                        token_json = creds.to_json()
+                        await repository.save_oauth2_token(
+                            token_json=token_json, provider="gmail"
+                        )
+                        logger.debug("已保存刷新后的凭据到数据库")
                 except Exception as e:
                     logger.warning(f"凭据刷新失败: {e}，需要重新授权")
                     creds = None
@@ -92,24 +147,60 @@ class GmailSender(EmailSender):
                         f"OAuth 2.0 凭据文件不存在: {settings.GOOGLE_OAUTH2_CREDENTIALS_FILE}"
                     )
 
-                logger.info("启动 OAuth 2.0 授权流程")
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    settings.GOOGLE_OAUTH2_CREDENTIALS_FILE, SCOPES
-                )
-                # 在本地服务器上运行授权流程
-                creds = flow.run_local_server(port=0)
+                logger.info("启动 OAuth 2.0 授权流程（使用 FastAPI 回调）")
+                await self._authorize_with_fastapi_callback()
 
-            # 保存凭据供下次使用
+            # 保存凭据到数据库供下次使用
             try:
-                with open(settings.GOOGLE_OAUTH2_TOKEN_FILE, "w") as token:
-                    token.write(creds.to_json())
-                logger.info(
-                    f"OAuth 2.0 凭据已保存到: {settings.GOOGLE_OAUTH2_TOKEN_FILE}"
+                if not db:
+                    raise ValueError("需要提供数据库会话以保存 token 到数据库")
+
+                repository = Repository(db)
+                token_json = creds.to_json()
+                await repository.save_oauth2_token(
+                    token_json=token_json, provider="gmail"
                 )
+                logger.info("✓ OAuth 2.0 凭据已成功保存到数据库")
             except Exception as e:
-                logger.warning(f"保存凭据失败: {e}，但将继续使用当前凭据")
+                logger.error(f"保存凭据到数据库失败: {e}", exc_info=True)
+                # 保存失败不应该阻止流程，但应该记录详细错误
+                raise EmailSendException(
+                    f"保存 OAuth 2.0 凭据到数据库失败: {str(e)}", e
+                )
 
         return creds
+
+    async def _authorize_with_fastapi_callback(self):
+        """
+        使用 FastAPI 回调端点进行 OAuth 2.0 授权
+
+        Returns:
+            Credentials: OAuth 2.0 凭据对象
+
+        Raises:
+            EmailSendException: 如果授权失败
+        """
+        # 构建回调 URL
+        redirect_uri = f"{settings.API_BASE_URL}/mail_manager/oauth2/callback"
+        logger.info(f"使用回调 URL: {redirect_uri}")
+
+        # 创建 OAuth 2.0 流程
+        flow = InstalledAppFlow.from_client_secrets_file(
+            settings.GOOGLE_OAUTH2_CREDENTIALS_FILE, SCOPES
+        )
+        flow.redirect_uri = redirect_uri
+
+        # 生成授权 URL
+        authorization_url, state = flow.authorization_url(
+            access_type="offline",  # 获取 refresh_token
+            include_granted_scopes="true",
+            prompt="consent",  # 强制显示同意页面，确保获取 refresh_token
+        )
+
+        logger.info(f"授权 URL: {authorization_url}")
+        logger.info("请手动在浏览器中打开上述 URL 并完成授权")
+
+        sys.exit(0)
 
     def _create_message(
         self,
@@ -187,6 +278,11 @@ class GmailSender(EmailSender):
         Raises:
             EmailSendException: 发送失败时抛出
         """
+        # 确保已初始化（传入数据库会话用于 OAuth 2.0 授权）
+        # 注意：send_email 方法没有 db 参数，所以这里无法传入
+        # 如果初始化时需要授权，会在 _ensure_initialized 中抛出异常
+        await self._ensure_initialized()
+
         try:
             # 构建邮件消息
             message = self._create_message(
@@ -202,7 +298,7 @@ class GmailSender(EmailSender):
             # 在后台线程中执行同步的 Gmail API 调用
             def _send_sync():
                 result = (
-                    self.service.users()
+                    self._service.users()
                     .messages()
                     .send(userId="me", body=message)
                     .execute()

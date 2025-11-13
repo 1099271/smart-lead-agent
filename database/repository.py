@@ -748,3 +748,140 @@ class Repository:
             )
         )
         return result.scalar() or 0
+
+    # ==================== OAuth 2.0 回调相关方法 ====================
+
+    async def create_oauth2_callback(
+        self,
+        state: str,
+        code: Optional[str] = None,
+        error: Optional[str] = None,
+        expires_in_seconds: int = 300,
+    ) -> models.OAuth2Callback:
+        """
+        创建 OAuth 2.0 回调记录
+
+        Args:
+            state: OAuth 2.0 state 参数（唯一标识）
+            code: 授权码（可选）
+            error: 错误信息（可选）
+            expires_in_seconds: 过期时间（秒），默认 5 分钟
+
+        Returns:
+            OAuth2Callback 对象
+        """
+        from datetime import timedelta
+
+        expires_at = datetime.now() + timedelta(seconds=expires_in_seconds)
+
+        callback = models.OAuth2Callback(
+            state=state,
+            code=code,
+            error=error,
+            expires_at=expires_at,
+        )
+        self.db.add(callback)
+        await self.db.commit()
+        await self.db.refresh(callback)
+        return callback
+
+    async def get_oauth2_callback_by_state(
+        self, state: str, consume: bool = True
+    ) -> Optional[models.OAuth2Callback]:
+        """
+        根据 state 获取 OAuth 2.0 回调记录
+
+        Args:
+            state: OAuth 2.0 state 参数
+            consume: 是否标记为已消费（默认 True）
+
+        Returns:
+            OAuth2Callback 对象，如果不存在或已过期则返回 None
+        """
+        from datetime import datetime
+
+        result = await self.db.execute(
+            select(models.OAuth2Callback).filter(
+                models.OAuth2Callback.state == state,
+                models.OAuth2Callback.consumed_at.is_(None),  # 未消费
+                models.OAuth2Callback.expires_at > datetime.now(),  # 未过期
+            )
+        )
+        callback = result.scalar_one_or_none()
+
+        if callback and consume:
+            # 标记为已消费
+            callback.consumed_at = datetime.now()
+            await self.db.commit()
+            await self.db.refresh(callback)
+
+        return callback
+
+    async def cleanup_expired_oauth2_callbacks(self) -> int:
+        """
+        清理过期的 OAuth 2.0 回调记录
+
+        Returns:
+            清理的记录数
+        """
+        from datetime import datetime
+        from sqlalchemy import delete
+
+        result = await self.db.execute(
+            delete(models.OAuth2Callback).filter(
+                models.OAuth2Callback.expires_at < datetime.now()
+            )
+        )
+        await self.db.commit()
+        return result.rowcount
+
+    # ==================== OAuth 2.0 Token 相关方法 ====================
+
+    async def get_oauth2_token(self, provider: str = "gmail") -> Optional[str]:
+        """
+        获取 OAuth 2.0 Token JSON 数据
+
+        Args:
+            provider: Token 提供者标识（默认 "gmail"）
+
+        Returns:
+            Token JSON 字符串，如果不存在则返回 None
+        """
+        result = await self.db.execute(
+            select(models.OAuth2Token).filter(models.OAuth2Token.provider == provider)
+        )
+        token_record = result.scalar_one_or_none()
+        return token_record.token_json if token_record else None
+
+    async def save_oauth2_token(
+        self, token_json: str, provider: str = "gmail"
+    ) -> models.OAuth2Token:
+        """
+        保存或更新 OAuth 2.0 Token JSON 数据
+
+        Args:
+            token_json: Token JSON 字符串（Credentials.to_json() 的结果）
+            provider: Token 提供者标识（默认 "gmail"）
+
+        Returns:
+            OAuth2Token 对象
+        """
+        # 先查询是否存在
+        result = await self.db.execute(
+            select(models.OAuth2Token).filter(models.OAuth2Token.provider == provider)
+        )
+        token_record = result.scalar_one_or_none()
+
+        if token_record:
+            # 更新现有记录
+            token_record.token_json = token_json
+            await self.db.commit()
+            await self.db.refresh(token_record)
+        else:
+            # 创建新记录
+            token_record = models.OAuth2Token(provider=provider, token_json=token_json)
+            self.db.add(token_record)
+            await self.db.commit()
+            await self.db.refresh(token_record)
+
+        return token_record

@@ -1,6 +1,7 @@
 """MailManager API 路由"""
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
+from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from database.connection import get_db
 from schemas.mail_manager import (
@@ -19,9 +20,7 @@ router = APIRouter(prefix="/mail_manager", tags=["MailManager"])
 
 
 @router.post("/send", response_model=SendEmailResponse)
-async def send_email(
-    request: SendEmailRequest, db: AsyncSession = Depends(get_db)
-):
+async def send_email(request: SendEmailRequest, db: AsyncSession = Depends(get_db)):
     """
     发送单封邮件
 
@@ -96,9 +95,7 @@ async def track_email_open(
 
 
 @router.get("/emails/{email_id}", response_model=EmailStatusResponse)
-async def get_email_status(
-    email_id: int, db: AsyncSession = Depends(get_db)
-):
+async def get_email_status(email_id: int, db: AsyncSession = Depends(get_db)):
     """
     查询邮件状态
 
@@ -149,3 +146,60 @@ async def get_emails_list(
         logger.error(f"查询邮件列表失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"查询邮件列表失败: {str(e)}")
 
+
+@router.get("/oauth2/callback")
+async def oauth2_callback(
+    code: str = Query(..., description="Google OAuth 2.0 授权码"),
+    state: str = Query(..., description="状态参数（必需，用于标识授权流程）"),
+    error: str = Query(None, description="错误信息（如果有）"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    OAuth 2.0 回调端点
+
+    接收 Google OAuth 2.0 授权流程的回调，处理授权码并换取 token
+
+    Args:
+        code: Google 返回的授权码
+        state: 状态参数（必需，用于标识授权流程）
+        error: 错误信息（如果有）
+        db: 数据库会话
+
+    Returns:
+        HTMLResponse: 显示授权结果的 HTML 页面
+    """
+    service = MailManagerService()
+    success, error_message = await service.handle_oauth2_callback(
+        code, state, error, db
+    )
+
+    if not success:
+        # 授权失败
+        status_code = 400 if error else 500
+        return HTMLResponse(
+            content=f"""
+            <html>
+                <head><title>授权失败</title></head>
+                <body>
+                    <h1>授权失败</h1>
+                    <p>{error_message or '授权过程中发生错误'}</p>
+                    <p>您可以关闭此页面。</p>
+                </body>
+            </html>
+            """,
+            status_code=status_code,
+        )
+
+    # 授权成功
+    return HTMLResponse(
+        content="""
+        <html>
+            <head><title>授权成功</title></head>
+            <body>
+                <h1>授权成功</h1>
+                <p>您已成功授权应用访问 Gmail，token 已保存到数据库。</p>
+                <p>您可以关闭此页面。</p>
+            </body>
+        </html>
+        """
+    )

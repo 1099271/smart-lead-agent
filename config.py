@@ -22,14 +22,13 @@ class Settings(BaseSettings):
 
     # API 密钥
     SERPER_API_KEY: str
-    OPENAI_API_KEY: str
 
     # Google Search API 配置
     GOOGLE_SEARCH_API_KEY: str = ""  # Google Custom Search API Key
     GOOGLE_SEARCH_CX: str = ""  # Google Custom Search Engine ID
 
     # OpenRouter 配置（用于国外 API：OpenAI、Anthropic 等）
-    OPENROUTER_API_KEY: str = ""  # 可选，如果为空则使用 OPENAI_API_KEY
+    OPENROUTER_API_KEY: str = ""  #
     OPENROUTER_SITE_URL: str = ""  # 可选，用于 OpenRouter 排名
     OPENROUTER_SITE_NAME: str = ""  # 可选，用于 OpenRouter 排名
 
@@ -59,9 +58,8 @@ class Settings(BaseSettings):
     GOOGLE_OAUTH2_CREDENTIALS_FILE: str = (
         ""  # OAuth 2.0 客户端凭据文件路径（credentials.json）
     )
-    GOOGLE_OAUTH2_TOKEN_FILE: str = (
-        ""  # OAuth 2.0 令牌文件路径（token.json，用于存储用户的 access token 和 refresh token）
-    )
+    # FastAPI 基础 URL（用于 OAuth 2.0 回调）
+    API_BASE_URL: str = "http://localhost:8000"  # FastAPI 服务的基础 URL
     RESEND_API_KEY: str = ""  # Resend API Key（Resend 发送器使用）
     TRACKING_BASE_URL: str = ""  # 追踪服务器基础 URL
     TRACKING_ENABLED: bool = True  # 是否启用追踪

@@ -2,9 +2,11 @@
 
 import asyncio
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Request
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.oauth2.credentials import Credentials
 
 from database.repository import Repository
 from database.models import EmailStatus, EmailTrackingEventType
@@ -20,6 +22,7 @@ from schemas.mail_manager import (
 from writer.service import WriterService
 from .email_sender import EmailSender, EmailSendException
 from .senders.factory import create_email_sender
+from .oauth2_manager import get_oauth2_manager
 from .utils import (
     generate_tracking_id,
     generate_tracking_pixel_url,
@@ -87,6 +90,15 @@ class MailManagerService:
                 raise ValueError("发件人邮箱未配置")
 
             # 4. 创建邮件记录（pending 状态）
+            # 注意：如果使用 Gmail 发送器且需要授权，需要先初始化
+            # Gmail 发送器使用延迟初始化，在第一次发送时才会初始化
+            # 如果初始化时需要授权，需要传入数据库会话
+            if hasattr(self.email_sender, "_ensure_initialized"):
+                try:
+                    await self.email_sender._ensure_initialized(db=db)
+                except Exception as e:
+                    logger.warning(f"邮件发送器初始化失败: {e}，将在发送时重试")
+
             email_record = await repository.create_email_record(
                 contact_id=contact_id,
                 company_id=company_id,
@@ -419,3 +431,73 @@ class MailManagerService:
             limit=limit,
             offset=offset,
         )
+
+    async def handle_oauth2_callback(
+        self, code: str, state: str, error: Optional[str], db: AsyncSession
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        处理 OAuth 2.0 回调
+
+        1. 如果有错误，保存错误信息到数据库
+        2. 如果成功，保存授权码到数据库，并用授权码换取 token，保存 token 到数据库
+
+        Args:
+            code: Google 返回的授权码
+            state: 状态参数（用于标识授权流程）
+            error: 错误信息（如果有）
+            db: 数据库会话
+
+        Returns:
+            tuple: (success, error_message) 成功返回 (True, None)，失败返回 (False, error_message)
+        """
+        manager = get_oauth2_manager(db=db)
+
+        if error:
+            # 如果有错误，保存到数据库
+            try:
+                await manager.set_error(error, state=state, db=db)
+                logger.error(f"OAuth 2.0 授权失败: {error} (state: {state})")
+            except Exception as e:
+                logger.error(f"保存 OAuth 2.0 错误失败: {e}", exc_info=True)
+            return False, error
+
+        # 保存授权码到数据库（用于跨进程通信，CLI 可能需要）
+        try:
+            await manager.set_authorization_code(code, state=state, db=db)
+            logger.info(f"OAuth 2.0 授权码已保存到数据库 (state: {state})")
+        except Exception as e:
+            logger.error(f"保存 OAuth 2.0 授权码失败: {e}", exc_info=True)
+            return False, f"保存授权信息时发生错误: {str(e)}"
+
+        # 立即用授权码换取 token 并保存到数据库
+        try:
+            # Gmail API 所需的作用域
+            SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
+
+            # 构建回调 URL（必须与授权时使用的 URL 一致）
+            redirect_uri = f"{settings.API_BASE_URL}/mail_manager/oauth2/callback"
+
+            # 创建 OAuth 2.0 流程
+            flow = InstalledAppFlow.from_client_secrets_file(
+                settings.GOOGLE_OAUTH2_CREDENTIALS_FILE, SCOPES
+            )
+            flow.redirect_uri = redirect_uri
+
+            # 使用授权码换取 token
+            logger.info(f"使用授权码换取 token (state: {state})")
+            flow.fetch_token(code=code)
+
+            # 获取凭据对象
+            creds = flow.credentials
+
+            # 保存 token 到数据库
+            repository = Repository(db)
+            token_json = creds.to_json()
+            await repository.save_oauth2_token(token_json=token_json, provider="gmail")
+            logger.info("✓ OAuth 2.0 token 已成功换取并保存到数据库")
+
+            return True, None
+
+        except Exception as e:
+            logger.error(f"换取或保存 OAuth 2.0 token 失败: {e}", exc_info=True)
+            return False, f"换取 token 时发生错误: {str(e)}"

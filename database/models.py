@@ -280,3 +280,52 @@ class EmailTracking(Base):
 
     # 关系
     email = relationship("Email", back_populates="tracking_events")
+
+
+class OAuth2Callback(Base):
+    """OAuth 2.0 回调记录表模型
+
+    用于存储 OAuth 2.0 授权流程中的回调信息，支持跨进程通信
+    """
+
+    __tablename__ = "oauth2_callbacks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # OAuth 2.0 state 参数（唯一标识一次授权流程）
+    state = Column(String(255), unique=True, nullable=False, index=True)
+    # 授权码
+    code = Column(String(512))  # 授权码可能很长
+    # 错误信息
+    error = Column(Text)  # 错误信息可能较长
+    # 时间戳
+    created_at = Column(TIMESTAMP, server_default=func.now(), index=True)
+    consumed_at = Column(TIMESTAMP)  # 消费时间（标记是否已被读取）
+    expires_at = Column(
+        TIMESTAMP, index=True
+    )  # 过期时间（默认 5 分钟后过期，用于自动清理）
+
+
+class OAuth2Token(Base):
+    """OAuth 2.0 Token 存储表模型
+
+    用于存储 Gmail OAuth 2.0 授权后的 token 信息（JSON 格式）
+    支持跨进程共享 token（CLI 和 FastAPI 可以共享同一个 token）
+    """
+
+    __tablename__ = "oauth2_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # Token 标识（用于区分不同的 token，如 "gmail"）
+    provider = Column(
+        String(50), unique=True, nullable=False, index=True, default="gmail"
+    )
+    # Token JSON 数据（完整的 Credentials.to_json() 结果）
+    token_json = Column(Text, nullable=False)
+    # 时间戳
+    created_at = Column(TIMESTAMP, server_default=func.now(), index=True)
+    updated_at = Column(
+        TIMESTAMP,
+        server_default=func.now(),
+        onupdate=func.current_timestamp(),
+        index=True,
+    )

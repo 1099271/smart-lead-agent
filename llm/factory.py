@@ -121,7 +121,7 @@ def _create_openrouter_llm(model: str, temperature: float, **kwargs):
         ChatModel: LangChain ChatModel 实例
     """
     # 获取 OpenRouter API Key
-    api_key = settings.OPENROUTER_API_KEY or settings.OPENAI_API_KEY
+    api_key = settings.OPENROUTER_API_KEY
     if not api_key:
         raise ValueError(
             "OpenRouter API Key 未配置。请设置 OPENROUTER_API_KEY 或 OPENAI_API_KEY"
