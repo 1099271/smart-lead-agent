@@ -47,6 +47,13 @@ def writer_group():
     help="公司名称",
 )
 @click.option(
+    "--generator-version",
+    type=str,
+    help="生成器版本",
+    default="v3",
+    choices=["v3", "v4"],
+)
+@click.option(
     "-v",
     "--verbose",
     is_flag=True,
@@ -57,6 +64,7 @@ def generate(
     company_id: Optional[int],
     company_name: Optional[str],
     verbose: bool,
+    generator_version: str,
 ):
     """
     根据公司信息生成营销邮件
@@ -84,7 +92,7 @@ def generate(
         logger.info("")
 
         # 运行异步任务
-        result = asyncio.run(_run_generate(company_id, company_name))
+        result = asyncio.run(_run_generate(company_id, company_name, generator_version))
 
         # 输出结果
         logger.info("")
@@ -123,7 +131,9 @@ def generate(
         return 1
 
 
-async def _run_generate(company_id: Optional[int], company_name: Optional[str]):
+async def _run_generate(
+    company_id: Optional[int], company_name: Optional[str], generator_version: str
+):
     """执行生成邮件异步任务"""
     async with AsyncSessionLocal() as session:
         try:
@@ -132,93 +142,13 @@ async def _run_generate(company_id: Optional[int], company_name: Optional[str]):
                 company_id=company_id,
                 company_name=company_name,
                 db=session,
+                generator_version=generator_version,
             )
             await session.commit()
             return result
         except Exception as e:
             await session.rollback()
             logger.error(f"生成邮件流程失败: {e}", exc_info=True)
-            raise
-        finally:
-            await session.close()
-
-
-@writer_group.command(name="batch-generate")
-@click.option(
-    "-v",
-    "--verbose",
-    is_flag=True,
-    help="显示详细日志输出",
-    default=False,
-)
-def batch_generate(verbose: bool):
-    """
-    为所有有邮箱的联系人生成邮件（按邮箱去重）
-
-    示例:
-        smart-lead writer batch-generate
-        smart-lead writer batch-generate --verbose
-    """
-    setup_logging(verbose)
-
-    try:
-        logger.info("=" * 60)
-        logger.info("Writer - 批量生成营销邮件")
-        logger.info("=" * 60)
-        logger.info("")
-
-        # 运行异步任务
-        result = asyncio.run(_run_batch_generate())
-
-        # 输出结果
-        logger.info("")
-        logger.info("=" * 60)
-        logger.info("✓ 完成！")
-        logger.info("=" * 60)
-        logger.info(f"总联系人数量: {result['total_contacts']}")
-        logger.info(f"生成邮件数量: {len(result['emails'])}")
-
-        if result["emails"]:
-            logger.info("")
-            logger.info("生成的邮件列表（前10条）:")
-            logger.info("-" * 60)
-            for i, email in enumerate(result["emails"][:10], 1):
-                logger.info(f"{i}. 联系人: {email.contact_name or '未知'}")
-                logger.info(f"   邮箱: {email.contact_email}")
-                logger.info(f"   职位: {email.contact_role or '未知'}")
-                logger.info(f"   主题: {email.subject or '未知'}")
-                logger.info(f"   联系人ID: {email.contact_id}")
-                logger.info("")
-            if len(result["emails"]) > 10:
-                logger.info(f"... 还有 {len(result['emails']) - 10} 封邮件未显示")
-
-        logger.info("=" * 60)
-        return 0
-
-    except KeyboardInterrupt:
-        logger.error("\n用户中断操作")
-        return 130
-    except ValueError as e:
-        logger.error(f"业务逻辑错误: {e}")
-        click.echo(f"错误: {e}", err=True)
-        return 1
-    except Exception as e:
-        logger.error(f"执行失败: {e}", exc_info=verbose)
-        click.echo(f"错误: {e}", err=True)
-        return 1
-
-
-async def _run_batch_generate():
-    """执行批量生成邮件异步任务"""
-    async with AsyncSessionLocal() as session:
-        try:
-            service = WriterService()
-            result = await service.generate_emails_for_all_contacts(db=session)
-            await session.commit()
-            return result
-        except Exception as e:
-            await session.rollback()
-            logger.error(f"批量生成邮件流程失败: {e}", exc_info=True)
             raise
         finally:
             await session.close()

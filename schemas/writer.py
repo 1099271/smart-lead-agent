@@ -47,3 +47,30 @@ class GenerateEmailResponse(BaseResponse):
     company_id: int
     company_name: str
     emails: List[EmailContent] = []  # 使用新的 EmailContent 模型
+
+
+# V4 相关模型
+class V4EmailFragment(BaseModel):
+    """V4 JSON 返回的 HTML 片段"""
+
+    subject: str  # 邮件主题
+    email_body_html: str  # HTML 片段
+
+
+class V4EmailContent(BaseModel):
+    """V4 组装后的完整邮件内容"""
+
+    contact_id: int  # 联系人ID
+    contact_name: Optional[str] = None  # 联系人姓名
+    contact_email: str  # 收件地址（必需）
+    contact_role: Optional[str] = None  # 联系人职位
+    subject: str  # 邮件主题
+    html_content: str  # 完整 HTML 邮件内容
+
+
+class V4GenerateEmailResponse(BaseResponse):
+    """V4 生成邮件响应模型"""
+
+    company_id: int
+    company_name: str
+    emails: List[V4EmailContent] = []  # V4 邮件列表

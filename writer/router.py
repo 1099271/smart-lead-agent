@@ -6,6 +6,7 @@ from database.connection import get_db
 from schemas.writer import (
     GenerateEmailRequest,
     GenerateEmailResponse,
+    V4GenerateEmailResponse,
 )
 from .service import WriterService
 from logs import logger
