@@ -4,6 +4,7 @@ from typing import Optional
 
 from ..email_sender import EmailSender
 from .gmail_sender import GmailSender
+from .resend_sender import ResendSender
 from config import settings
 from logs import logger
 
@@ -13,7 +14,7 @@ def create_email_sender(sender_type: Optional[str] = None) -> EmailSender:
     创建邮件发送器实例
 
     Args:
-        sender_type: 发送器类型（gmail/smtp），如果为 None 则从配置读取
+        sender_type: 发送器类型（gmail/resend/smtp），如果为 None 则从配置读取
 
     Returns:
         EmailSender 实例
@@ -29,9 +30,11 @@ def create_email_sender(sender_type: Optional[str] = None) -> EmailSender:
     if sender_type == "gmail":
         logger.info("创建 Gmail 发送器实例")
         return GmailSender()
+    elif sender_type == "resend":
+        logger.info("创建 Resend 发送器实例")
+        return ResendSender()
     elif sender_type == "smtp":
         # 未来实现 SMTP 发送器
         raise NotImplementedError("SMTP 发送器尚未实现")
     else:
         raise ValueError(f"不支持的邮件发送器类型: {sender_type}")
-

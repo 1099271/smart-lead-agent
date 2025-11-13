@@ -41,7 +41,7 @@ BRIEF_PROMPT = """
       <screenshot_mention_vi>như thể hiện trong ảnh đính kèm (kết quả hải quan &amp; bộ lọc thông minh)</screenshot_mention_vi>
     </assets>
     <product>
-      <trial_url>https://www.tendata.com/data/?email1110</trial_url>
+      <trial_url>{trial_url}</trial_url>
     </product>
     <locale>
       <market>Vietnam</market>

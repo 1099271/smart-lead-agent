@@ -68,47 +68,6 @@ class MailManagerService:
                 html_content = request.html_content
                 contact_id = request.contact_id
                 company_id = request.company_id
-            elif request.contact_id:
-                # 方式2: 从 Writer 模块获取
-                logger.info(f"从 Writer 模块获取邮件内容，contact_id: {request.contact_id}")
-
-                # 获取联系人信息
-                contact = await repository.get_contact_by_id(request.contact_id)
-                if not contact:
-                    raise ValueError(f"联系人不存在: {request.contact_id}")
-
-                if not contact.email:
-                    raise ValueError(f"联系人 {request.contact_id} 没有邮箱地址")
-
-                company_id = contact.company_id
-                company = await repository.get_company_by_id(company_id)
-                if not company:
-                    raise ValueError(f"公司不存在: {company_id}")
-
-                # 如果请求中没有提供 to_email，使用联系人的邮箱
-                if not request.to_email:
-                    request.to_email = contact.email
-                if not request.to_name:
-                    request.to_name = contact.full_name
-
-                # 调用 Writer 服务生成邮件（为整个公司生成，然后筛选）
-                writer_result = await self.writer_service.generate_emails(
-                    company_id=company_id, db=db
-                )
-
-                # 查找对应联系人的邮件
-                email_content = None
-                for email in writer_result.get("emails", []):
-                    if email.contact_id == request.contact_id:
-                        email_content = email
-                        break
-
-                if not email_content:
-                    raise ValueError(f"未能为联系人 {request.contact_id} 生成邮件")
-
-                subject = email_content.subject
-                html_content = email_content.html_content
-                contact_id = request.contact_id
             else:
                 raise ValueError("必须提供邮件内容或 contact_id")
 
@@ -144,9 +103,7 @@ class MailManagerService:
             )
 
             # 5. 更新状态为 sending
-            await repository.update_email_status(
-                email_record.id, EmailStatus.sending
-            )
+            await repository.update_email_status(email_record.id, EmailStatus.sending)
 
             # 6. 调用邮件发送器发送
             try:
@@ -462,4 +419,3 @@ class MailManagerService:
             limit=limit,
             offset=offset,
         )
-

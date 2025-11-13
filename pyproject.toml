@@ -25,6 +25,9 @@ dependencies = [
     "google-auth>=2.0.0",
     "tenacity>=8.0.0",
     "Pillow>=10.0.0",
+    "google-auth-httplib2>=0.2.1",
+    "google-auth-oauthlib>=1.2.2",
+    "resend>=2.19.0",
 ]
 
 [project.optional-dependencies]
