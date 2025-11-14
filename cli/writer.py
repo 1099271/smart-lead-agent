@@ -48,10 +48,9 @@ def writer_group():
 )
 @click.option(
     "--generator-version",
-    type=str,
+    type=click.Choice(["v3", "v4"]),
     help="生成器版本",
     default="v3",
-    choices=["v3", "v4"],
 )
 @click.option(
     "-v",
@@ -113,6 +112,8 @@ def generate(
                 logger.info(f"   职位: {email.contact_role or '未知'}")
                 logger.info(f"   主题: {email.subject or '未知'}")
                 logger.info(f"   联系人ID: {email.contact_id}")
+                logger.info(f"   生成器版本: {generator_version}")
+                logger.info(f"   邮件内容: {email.html_content}")
                 logger.info("")
 
         logger.info("=" * 60)
