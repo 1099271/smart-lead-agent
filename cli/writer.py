@@ -3,6 +3,8 @@
 import asyncio
 import logging
 import sys
+import tempfile
+import webbrowser
 from typing import Optional
 
 import click
@@ -106,15 +108,45 @@ def generate(
             logger.info("")
             logger.info("生成的邮件列表:")
             logger.info("-" * 60)
+            temp_files = []
             for i, email in enumerate(result["emails"], 1):
-                logger.info(f"{i}. 联系人: {email.contact_name or '未知'}")
-                logger.info(f"   邮箱: {email.contact_email}")
-                logger.info(f"   职位: {email.contact_role or '未知'}")
-                logger.info(f"   主题: {email.subject or '未知'}")
-                logger.info(f"   联系人ID: {email.contact_id}")
-                logger.info(f"   生成器版本: {generator_version}")
-                logger.info(f"   邮件内容: {email.html_content}")
-                logger.info("")
+                # 生成安全的文件名（包含联系人信息）
+                contact_name_safe = (
+                    (email.contact_name or "未知")
+                    .replace(" ", "_")
+                    .replace("/", "_")
+                    .replace("\\", "_")
+                    .replace(":", "_")
+                    .replace("*", "_")
+                    .replace("?", "_")
+                    .replace('"', "_")
+                    .replace("<", "_")
+                    .replace(">", "_")
+                    .replace("|", "_")
+                )[
+                    :50
+                ]  # 限制文件名长度
+                file_prefix = f"email_{i}_{contact_name_safe}_{email.contact_id}"
+
+                # 创建临时HTML文件
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=".html", prefix=file_prefix + "_"
+                ) as temp:
+                    temp.write(email.html_content.encode("utf-8"))
+                    temp_url = "file://" + temp.name
+                    temp_files.append(temp.name)
+                    logger.info(f"  已保存: {temp.name}")
+
+                # 在浏览器中打开
+                try:
+                    webbrowser.open(temp_url)
+                    logger.info(f"  已在浏览器中打开: {email.contact_name or '未知'}")
+                except Exception as e:
+                    logger.warning(f"  无法在浏览器中打开文件: {e}")
+                    logger.info(f"  请手动打开: {temp.name}")
+
+            logger.info("")
+            logger.info(f"共创建 {len(temp_files)} 个HTML文件")
 
         logger.info("=" * 60)
         return 0
